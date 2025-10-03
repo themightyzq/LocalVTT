@@ -1,0 +1,221 @@
+name: Release Build
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+      - 'v*.*.*-*'  # Include pre-release tags like v1.0.0-alpha
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (e.g., v1.0.0)'
+        required: true
+        type: string
+
+env:
+  BUILD_TYPE: Release
+  QT_VERSION: '6.7.2'
+
+jobs:
+  build-all-platforms:
+    strategy:
+      matrix:
+        include:
+          - os: macos-13
+            name: macOS
+            artifact_name: LocalVTT-macOS-universal
+            archive_ext: zip
+          - os: windows-latest
+            name: Windows
+            artifact_name: LocalVTT-Windows-x64
+            archive_ext: zip
+          - os: ubuntu-22.04
+            name: Linux
+            artifact_name: LocalVTT-Linux-x64
+            archive_ext: tar.gz
+
+    runs-on: ${{ matrix.os }}
+    name: Build for ${{ matrix.name }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0  # Full history for version extraction
+
+      - name: Extract version from tag
+        id: version
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ github.event.inputs.tag }}"
+          else
+            VERSION="${{ github.ref_name }}"
+          fi
+          echo "VERSION=${VERSION}" >> $GITHUB_OUTPUT
+          echo "Building version: ${VERSION}"
+
+      # macOS specific steps
+      - name: Install Qt6 (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install qt@6
+          echo "CMAKE_PREFIX_PATH=$(brew --prefix qt@6)" >> $GITHUB_ENV
+
+      - name: Setup macOS build
+        if: runner.os == 'macOS'
+        run: |
+          echo "CMAKE_ARGS=-DCMAKE_OSX_ARCHITECTURES=x86_64;arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0" >> $GITHUB_ENV
+
+      # Windows specific steps
+      - name: Setup MSVC (Windows)
+        if: runner.os == 'Windows'
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Install Qt6 (Windows)
+        if: runner.os == 'Windows'
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          modules: 'qtsvg qtmultimedia'
+          cache: true
+
+      # Linux specific steps
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            qt6-base-dev qt6-svg-dev qt6-multimedia-dev \
+            libqt6opengl6-dev libgl1-mesa-dev libglu1-mesa-dev \
+            cmake build-essential ninja-build
+
+      # Common build steps
+      - name: Configure CMake
+        shell: bash
+        run: |
+          mkdir -p build
+          cd build
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            cmake .. -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} -G "Visual Studio 17 2022" -A x64
+          else
+            cmake .. -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} ${CMAKE_ARGS:-} ${CMAKE_PREFIX_PATH:+-DCMAKE_PREFIX_PATH=$CMAKE_PREFIX_PATH}
+          fi
+
+      - name: Build LocalVTT
+        shell: bash
+        run: |
+          cd build
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            cmake --build . --config ${{ env.BUILD_TYPE }} --parallel
+          else
+            cmake --build . --config ${{ env.BUILD_TYPE }} -j$(nproc 2>/dev/null || sysctl -n hw.ncpu)
+          fi
+
+      # Platform-specific packaging
+      - name: Package macOS
+        if: runner.os == 'macOS'
+        run: |
+          cd build
+          # Optionally codesign here if certificates are available
+          zip -r LocalVTT-${{ steps.version.outputs.VERSION }}-macOS-universal.zip LocalVTT.app
+          echo "PACKAGE_FILE=LocalVTT-${{ steps.version.outputs.VERSION }}-macOS-universal.zip" >> $GITHUB_ENV
+
+      - name: Package Windows
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: |
+          cd build\%BUILD_TYPE%
+          windeployqt --release --no-translations --no-system-d3d-compiler --no-opengl-sw LocalVTT.exe
+          powershell Compress-Archive -Path * -DestinationPath ..\LocalVTT-${{ steps.version.outputs.VERSION }}-Windows-x64.zip
+          echo PACKAGE_FILE=LocalVTT-${{ steps.version.outputs.VERSION }}-Windows-x64.zip >> %GITHUB_ENV%
+
+      - name: Package Linux
+        if: runner.os == 'Linux'
+        run: |
+          cd build
+          mkdir -p LocalVTT-portable
+          cp LocalVTT LocalVTT-portable/
+          tar -czf LocalVTT-${{ steps.version.outputs.VERSION }}-Linux-x64.tar.gz LocalVTT-portable/
+          echo "PACKAGE_FILE=LocalVTT-${{ steps.version.outputs.VERSION }}-Linux-x64.tar.gz" >> $GITHUB_ENV
+
+      - name: Upload release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}-${{ steps.version.outputs.VERSION }}
+          path: build/${{ env.PACKAGE_FILE }}
+          retention-days: 90
+
+  create-release:
+    needs: build-all-platforms
+    runs-on: ubuntu-latest
+    if: success()
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Extract version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ github.event.inputs.tag }}"
+          else
+            VERSION="${{ github.ref_name }}"
+          fi
+          echo "VERSION=${VERSION}" >> $GITHUB_OUTPUT
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          # Generate changelog from git history
+          echo "# LocalVTT ${{ steps.version.outputs.VERSION }}" > CHANGELOG.md
+          echo "" >> CHANGELOG.md
+          echo "## Release Date: $(date +'%Y-%m-%d')" >> CHANGELOG.md
+          echo "" >> CHANGELOG.md
+
+          # Try to get commits since last tag
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          if [ -n "$PREV_TAG" ]; then
+            echo "## Changes since ${PREV_TAG}:" >> CHANGELOG.md
+            echo "" >> CHANGELOG.md
+            git log ${PREV_TAG}..HEAD --pretty=format:"- %s (%an)" >> CHANGELOG.md
+          else
+            echo "## Initial Release" >> CHANGELOG.md
+            echo "" >> CHANGELOG.md
+            echo "- First release of LocalVTT" >> CHANGELOG.md
+          fi
+
+          echo "" >> CHANGELOG.md
+          echo "## Downloads" >> CHANGELOG.md
+          echo "" >> CHANGELOG.md
+          echo "- **macOS (Universal)**: Supports both Intel and Apple Silicon Macs" >> CHANGELOG.md
+          echo "- **Windows (x64)**: Windows 10/11 64-bit" >> CHANGELOG.md
+          echo "- **Linux (x64)**: Ubuntu 22.04+ and compatible distributions" >> CHANGELOG.md
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.VERSION }}
+          name: LocalVTT ${{ steps.version.outputs.VERSION }}
+          body_path: CHANGELOG.md
+          draft: true  # Create as draft for manual review
+          prerelease: ${{ contains(steps.version.outputs.VERSION, '-') }}
+          files: |
+            release-artifacts/**/*.zip
+            release-artifacts/**/*.tar.gz
+          fail_on_unmatched_files: false
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Output release URL
+        run: |
+          echo "Release draft created successfully!"
+          echo "Please review and publish at: https://github.com/${{ github.repository }}/releases"

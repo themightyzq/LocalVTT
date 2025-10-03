@@ -1,0 +1,164 @@
+name: Continuous Integration
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  code-quality:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for better analysis
+
+      - name: Check file encoding
+        run: |
+          echo "Checking for non-UTF8 files..."
+          find . -name "*.cpp" -o -name "*.h" -o -name "*.hpp" | while read file; do
+            if ! file -b "$file" | grep -qE "(ASCII|UTF-8)"; then
+              echo "Warning: $file may not be UTF-8 encoded"
+            fi
+          done
+
+      - name: Check line endings
+        run: |
+          echo "Checking for Windows line endings..."
+          find . -name "*.cpp" -o -name "*.h" -o -name "*.hpp" | while read file; do
+            if file "$file" | grep -q "CRLF"; then
+              echo "Warning: $file has Windows line endings"
+            fi
+          done
+
+      - name: Check for tabs vs spaces
+        run: |
+          echo "Checking indentation consistency..."
+          # Count files with tabs
+          TAB_COUNT=$(find . -name "*.cpp" -o -name "*.h" | xargs grep -l "^	" | wc -l)
+          # Count files with 4-space indentation
+          SPACE_COUNT=$(find . -name "*.cpp" -o -name "*.h" | xargs grep -l "^    " | wc -l)
+          echo "Files with tabs: $TAB_COUNT"
+          echo "Files with spaces: $SPACE_COUNT"
+
+      - name: Check header guards
+        run: |
+          echo "Checking header guard conventions..."
+          find . -name "*.h" -o -name "*.hpp" | while read file; do
+            filename=$(basename "$file" | tr '[:lower:]' '[:upper:]' | tr '.' '_')
+            if ! grep -q "#ifndef.*${filename}" "$file" && ! grep -q "#pragma once" "$file"; then
+              echo "Warning: $file might be missing header guards"
+            fi
+          done
+
+      - name: License check
+        run: |
+          echo "Checking for license headers..."
+          LICENSE_FILES=0
+          NO_LICENSE_FILES=0
+          for file in $(find . -name "*.cpp" -o -name "*.h" -o -name "*.hpp"); do
+            if head -20 "$file" | grep -qiE "(copyright|license|gpl|mit|apache|bsd)"; then
+              LICENSE_FILES=$((LICENSE_FILES + 1))
+            else
+              NO_LICENSE_FILES=$((NO_LICENSE_FILES + 1))
+              echo "No license header found in: $file"
+            fi
+          done
+          echo "Files with license headers: $LICENSE_FILES"
+          echo "Files without license headers: $NO_LICENSE_FILES"
+
+      - name: TODO/FIXME scan
+        run: |
+          echo "Scanning for TODO and FIXME comments..."
+          echo "## TODO Comments:" > todo-report.md
+          grep -r "TODO" --include="*.cpp" --include="*.h" --include="*.hpp" . | head -20 >> todo-report.md || true
+          echo "" >> todo-report.md
+          echo "## FIXME Comments:" >> todo-report.md
+          grep -r "FIXME" --include="*.cpp" --include="*.h" --include="*.hpp" . | head -20 >> todo-report.md || true
+          cat todo-report.md
+
+      - name: Check CMakeLists.txt
+        run: |
+          echo "Validating CMakeLists.txt..."
+          if [ -f "CMakeLists.txt" ]; then
+            # Check for minimum version
+            if ! grep -q "cmake_minimum_required" CMakeLists.txt; then
+              echo "Warning: cmake_minimum_required not found"
+            fi
+            # Check for project name
+            if ! grep -q "project(" CMakeLists.txt; then
+              echo "Warning: project() command not found"
+            fi
+            echo "CMakeLists.txt appears valid"
+          else
+            echo "ERROR: CMakeLists.txt not found!"
+            exit 1
+          fi
+
+      - name: Security scan for hardcoded secrets
+        run: |
+          echo "Scanning for potential hardcoded secrets..."
+          # Look for common secret patterns
+          grep -r -E "(api[_-]?key|secret|password|token|private[_-]?key)" \
+            --include="*.cpp" --include="*.h" --include="*.hpp" . | \
+            grep -v -E "(//|/\*|\*|#define.*PASSWORD.*nullptr)" | head -10 || echo "No obvious secrets found"
+
+      - name: Memory leak pattern check
+        run: |
+          echo "Checking for common memory leak patterns..."
+          echo "## Potential Memory Issues:" > memory-report.md
+
+          # Check for new without delete
+          echo "### new without delete (first 10):" >> memory-report.md
+          grep -r "new " --include="*.cpp" . | grep -v "delete" | head -10 >> memory-report.md || true
+
+          # Check for malloc without free
+          echo "### malloc without free (first 10):" >> memory-report.md
+          grep -r "malloc" --include="*.cpp" . | grep -v "free" | head -10 >> memory-report.md || true
+
+          cat memory-report.md
+
+      - name: Upload analysis reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: code-analysis-reports
+          path: |
+            todo-report.md
+            memory-report.md
+          retention-days: 7
+          if-no-files-found: ignore
+
+  minimal-build-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install minimal dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            qt6-base-dev \
+            cmake \
+            build-essential
+
+      - name: Test CMake configuration
+        run: |
+          mkdir build-test
+          cd build-test
+          if cmake ..; then
+            echo "✓ CMake configuration successful"
+          else
+            echo "✗ CMake configuration failed"
+            exit 1
+          fi
+
+      - name: Check build targets
+        run: |
+          cd build-test
+          echo "Available build targets:"
+          cmake --build . --target help 2>/dev/null | grep -E "^\.\.\." || true

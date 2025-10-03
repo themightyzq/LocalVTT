@@ -1,0 +1,126 @@
+# Build directories
+build/
+*.build/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+
+# Qt generated files
+*.moc
+moc_*.cpp
+qrc_*.cpp
+ui_*.h
+*.autosave
+.qmake.stash
+*.pro.user
+*.pro.user.*
+LocalVTT_autogen/
+
+# Executables
+*.exe
+*.app
+*.out
+LocalVTT
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Editor directories and files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+*.sublime-*
+
+# Backup files
+*.bak
+*.backup
+*.old
+
+# Logs
+*.log
+
+# Temporary files
+*.tmp
+*.temp
+
+# Python cache (for test scripts)
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Archive directory (old test files)
+archive/
+
+# Test artifacts
+test_*.png
+test_*.log
+test_vtt_loader
+simple_vtt_test
+test_simple
+qa_*.json
+qa_*.py
+
+# Temporary test files in root
+test_*.sh
+test_*.cpp
+test_*.py
+TEST_*.md
+*_REPORT*.md
+*_TEST*.md
+*_SUMMARY.md
+CRITICAL_TESTS.md
+FINAL_QA_REPORT.md
+comprehensive_*.py
+manual_test_*.py
+critical_features_*.md
+
+# Build artifacts
+*.o
+*.zip
+*.patch
+build_clean.sh
+build_fixed.sh
+filter_*.sh
+test_app
+test_qt_minimal_app
+test_minimal
+test.pro
+test_minimal.pro
+
+# Archive directory
+archive_cleanup_*/
+
+# Claude AI development files (keep locally, don't track in git)
+.claude/
+CLAUDE.md
+ROADMAP.md
+TESTING.md
+TODO.md
+
+# Development documentation (keep locally, don't track in git)
+docs/development/
+docs/reports/
+docs/BUILD_README.md
+docs/QA_REPORT.txt
+docs/QA_REPORT_COMPREHENSIVE.md
+docs/TEST_REPORT.md
+
+# Test assets (keep locally, don't track in git)
+test_assets/
+
+# Test scripts (keep locally, don't track in git)
+scripts/test-*.sh
+scripts/validate-*.sh
+
+# IDE specific
+.diversion/
+.dvignore

@@ -1,0 +1,9 @@
+<!DOCTYPE RCC>
+<RCC version="1.0">
+    <qresource prefix="/">
+        <file alias="shaders/basic.vert">shaders/basic.vert</file>
+        <file alias="shaders/basic.frag">shaders/basic.frag</file>
+        <file alias="shaders/lighting.vert">shaders/lighting.vert</file>
+        <file alias="shaders/lighting.frag">shaders/lighting.frag</file>
+    </qresource>
+</RCC>

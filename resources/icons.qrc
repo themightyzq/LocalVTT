@@ -1,0 +1,25 @@
+<RCC>
+  <qresource prefix="/">
+    <file alias="icons/reveal_circle.svg">icons/reveal_circle.svg</file>
+    <file alias="icons/hide_circle.svg">icons/hide_circle.svg</file>
+    <file alias="icons/reveal_rect.svg">icons/reveal_rect.svg</file>
+    <file alias="icons/hide_rect.svg">icons/hide_rect.svg</file>
+    <file alias="icons/player_view.svg">icons/player_view.svg</file>
+    <file alias="icons/clear_fog.svg">icons/clear_fog.svg</file>
+    <file alias="icons/reset_fog.svg">icons/reset_fog.svg</file>
+    <file alias="icons/open_map.svg">icons/open_map.svg</file>
+    <file alias="icons/grid.svg">icons/grid.svg</file>
+    <file alias="icons/grid_hex.svg">icons/grid_hex.svg</file>
+    <file alias="icons/calibrate.svg">icons/calibrate.svg</file>
+    <file alias="icons/undo.svg">icons/undo.svg</file>
+    <file alias="icons/redo.svg">icons/redo.svg</file>
+    <file alias="icons/fog_brush.svg">icons/fog_brush.svg</file>
+    <file alias="icons/fog_rect.svg">icons/fog_rect.svg</file>
+    <file alias="icons/fog_clear.svg">icons/fog_clear.svg</file>
+    <file alias="icons/fog_reset.svg">icons/fog_reset.svg</file>
+    <file alias="icons/fog.svg">icons/fog.svg</file>
+    <file alias="icons/reset.svg">icons/reset.svg</file>
+    <file alias="icons/pan.svg">icons/pan.svg</file>
+    <file alias="icons/pointer.svg">icons/pointer.svg</file>
+  </qresource>
+</RCC>

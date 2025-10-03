@@ -1,0 +1,318 @@
+name: Multi-Platform Build
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:  # Allow manual triggering
+
+env:
+  BUILD_TYPE: Release
+  QT_VERSION: '6.7.2'
+
+jobs:
+  build-macos:
+    runs-on: macos-13  # Intel Mac for broader compatibility
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup build environment
+        run: |
+          echo "Build started at $(date)"
+          echo "macOS version: $(sw_vers -productVersion)"
+          echo "Xcode version: $(xcodebuild -version | head -1)"
+
+      - name: Install Qt6
+        run: |
+          brew install qt@6
+          echo "Qt installed at: $(brew --prefix qt@6)"
+          echo "Qt version: $(brew list --versions qt@6)"
+
+      - name: Configure CMake
+        run: |
+          mkdir -p build
+          cd build
+          cmake .. \
+            -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} \
+            -DCMAKE_PREFIX_PATH=$(brew --prefix qt@6) \
+            -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64" \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0
+        env:
+          CMAKE_OSX_ARCHITECTURES: "x86_64;arm64"  # Universal binary
+
+      - name: Build LocalVTT
+        run: |
+          cd build
+          cmake --build . --config ${{ env.BUILD_TYPE }} -j$(sysctl -n hw.ncpu)
+
+      - name: Verify build
+        run: |
+          echo "=== Build verification ==="
+          if [ -d "build/LocalVTT.app" ]; then
+            echo "LocalVTT.app bundle created successfully"
+            ls -la build/LocalVTT.app/Contents/MacOS/
+            file build/LocalVTT.app/Contents/MacOS/LocalVTT
+            echo "Architecture info:"
+            lipo -info build/LocalVTT.app/Contents/MacOS/LocalVTT || true
+          else
+            echo "ERROR: LocalVTT.app not found!"
+            ls -la build/
+            exit 1
+          fi
+
+      - name: Run basic tests
+        run: |
+          cd build
+          # Check if the app launches (will fail if missing dependencies)
+          ./LocalVTT.app/Contents/MacOS/LocalVTT --version || echo "Version flag not implemented"
+        continue-on-error: true
+
+      - name: Package macOS app
+        run: |
+          cd build
+          # Create a proper DMG or ZIP
+          zip -r LocalVTT-macOS-universal.zip LocalVTT.app
+          echo "Package size: $(du -h LocalVTT-macOS-universal.zip | cut -f1)"
+
+      - name: Upload macOS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: LocalVTT-macOS-universal
+          path: build/LocalVTT-macOS-universal.zip
+          retention-days: 30
+          if-no-files-found: error
+
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup MSVC
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Install Qt6
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          modules: 'qtsvg qtmultimedia'
+          cache: true
+          cache-key-prefix: 'qt-windows'
+
+      - name: Configure CMake
+        run: |
+          mkdir build
+          cd build
+          cmake .. -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} -G "Visual Studio 17 2022" -A x64
+
+      - name: Build LocalVTT
+        run: |
+          cd build
+          cmake --build . --config ${{ env.BUILD_TYPE }} --parallel $env:NUMBER_OF_PROCESSORS
+
+      - name: Verify build
+        shell: powershell
+        run: |
+          Write-Host "=== Build verification ==="
+          $exePath = "build\${{ env.BUILD_TYPE }}\LocalVTT.exe"
+          if (Test-Path $exePath) {
+            Write-Host "LocalVTT.exe found successfully"
+            Get-Item $exePath | Format-List Name, Length, LastWriteTime
+          } else {
+            Write-Host "ERROR: LocalVTT.exe not found at expected path!"
+            Write-Host "Checking build directory contents:"
+            Get-ChildItem -Path build -Recurse -Filter "*.exe" | Format-Table FullName
+            exit 1
+          }
+
+      - name: Deploy Qt dependencies
+        shell: cmd
+        run: |
+          cd build\%BUILD_TYPE%
+          windeployqt --release --no-translations --no-system-d3d-compiler --no-opengl-sw LocalVTT.exe
+
+      - name: Package Windows app
+        shell: powershell
+        run: |
+          cd build\${{ env.BUILD_TYPE }}
+          Compress-Archive -Path * -DestinationPath ..\LocalVTT-Windows-x64.zip
+          Write-Host "Package size: $((Get-Item ..\LocalVTT-Windows-x64.zip).Length / 1MB) MB"
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: LocalVTT-Windows-x64
+          path: build/LocalVTT-Windows-x64.zip
+          retention-days: 30
+          if-no-files-found: error
+
+  build-linux:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup build environment
+        run: |
+          echo "Build started at $(date)"
+          echo "Linux version: $(lsb_release -a)"
+          echo "GCC version: $(gcc --version | head -1)"
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            qt6-base-dev \
+            qt6-svg-dev \
+            qt6-multimedia-dev \
+            libqt6opengl6-dev \
+            libgl1-mesa-dev \
+            libglu1-mesa-dev \
+            cmake \
+            build-essential \
+            ninja-build \
+            libxcb-xinerama0 \
+            libxcb-cursor0
+
+      - name: Configure CMake
+        run: |
+          mkdir -p build
+          cd build
+          cmake .. \
+            -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} \
+            -G Ninja
+
+      - name: Build LocalVTT
+        run: |
+          cd build
+          cmake --build . --config ${{ env.BUILD_TYPE }} -j$(nproc)
+
+      - name: Verify build
+        run: |
+          echo "=== Build verification ==="
+          if [ -f "build/LocalVTT" ]; then
+            echo "LocalVTT binary created successfully"
+            ls -la build/LocalVTT
+            file build/LocalVTT
+            echo "=== Library dependencies ==="
+            ldd build/LocalVTT | head -20
+            echo "=== Binary info ==="
+            readelf -h build/LocalVTT | grep -E "Class|Machine|Version"
+          else
+            echo "ERROR: LocalVTT binary not found!"
+            ls -la build/
+            exit 1
+          fi
+
+      - name: Create AppImage
+        run: |
+          # Download linuxdeployqt
+          wget -c https://github.com/probonopd/linuxdeployqt/releases/download/continuous/linuxdeployqt-continuous-x86_64.AppImage
+          chmod a+x linuxdeployqt-continuous-x86_64.AppImage
+
+          # Prepare AppDir structure
+          mkdir -p AppDir/usr/bin
+          cp build/LocalVTT AppDir/usr/bin/
+
+          # Create desktop file
+          cat > AppDir/LocalVTT.desktop <<EOF
+          [Desktop Entry]
+          Type=Application
+          Name=LocalVTT
+          Comment=Atmospheric immersion for tabletop gaming
+          Exec=LocalVTT
+          Icon=LocalVTT
+          Categories=Game;RolePlaying;
+          EOF
+
+          # Create a simple icon if not exists
+          if [ ! -f "resources/icon.png" ]; then
+            # Create a placeholder icon
+            echo "Creating placeholder icon"
+            mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps/
+            # Would need ImageMagick: convert -size 256x256 xc:navy AppDir/usr/share/icons/hicolor/256x256/apps/LocalVTT.png
+          fi
+
+          # Run linuxdeployqt (may fail on newer systems, that's okay)
+          ./linuxdeployqt-continuous-x86_64.AppImage AppDir/usr/bin/LocalVTT -appimage -no-translations || true
+        continue-on-error: true
+
+      - name: Package Linux app
+        run: |
+          cd build
+          # Create tarball with binary and basic structure
+          mkdir -p LocalVTT-Linux
+          cp LocalVTT LocalVTT-Linux/
+
+          # Create a simple launch script
+          cat > LocalVTT-Linux/LocalVTT.sh <<'EOF'
+          #!/bin/bash
+          SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+          export LD_LIBRARY_PATH="${SCRIPT_DIR}/lib:${LD_LIBRARY_PATH}"
+          exec "${SCRIPT_DIR}/LocalVTT" "$@"
+          EOF
+          chmod +x LocalVTT-Linux/LocalVTT.sh
+
+          # Package it
+          tar -czf LocalVTT-Linux-x64.tar.gz LocalVTT-Linux/
+          echo "Package size: $(du -h LocalVTT-Linux-x64.tar.gz | cut -f1)"
+
+      - name: Upload Linux artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: LocalVTT-Linux-x64
+          path: build/LocalVTT-Linux-x64.tar.gz
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Upload AppImage (if created)
+        uses: actions/upload-artifact@v4
+        with:
+          name: LocalVTT-Linux-AppImage
+          path: LocalVTT*.AppImage
+          retention-days: 30
+          if-no-files-found: ignore
+
+  create-release-summary:
+    needs: [build-macos, build-windows, build-linux]
+    runs-on: ubuntu-latest
+    if: always()
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create build summary
+        run: |
+          echo "# Build Summary" > build-summary.md
+          echo "" >> build-summary.md
+          echo "## Build Status" >> build-summary.md
+          echo "- macOS: ${{ needs.build-macos.result }}" >> build-summary.md
+          echo "- Windows: ${{ needs.build-windows.result }}" >> build-summary.md
+          echo "- Linux: ${{ needs.build-linux.result }}" >> build-summary.md
+          echo "" >> build-summary.md
+          echo "## Artifacts" >> build-summary.md
+          echo "The following artifacts were created:" >> build-summary.md
+          ls -la artifacts/*/* 2>/dev/null | awk '{print "- " $NF " (" $5 " bytes)"}' >> build-summary.md || echo "No artifacts found" >> build-summary.md
+
+          cat build-summary.md
+
+      - name: Upload build summary
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-summary
+          path: build-summary.md
+          retention-days: 30
