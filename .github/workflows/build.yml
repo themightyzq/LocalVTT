@@ -97,7 +97,7 @@ jobs:
         uses: jurplel/install-qt-action@v4
         with:
           version: ${{ env.QT_VERSION }}
-          modules: 'qtsvg qtmultimedia'
+          # QtSvg and QtMultimedia are included in base Qt6 for Windows
           cache: true
           cache-key-prefix: 'qt-windows'
 
