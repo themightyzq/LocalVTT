@@ -33,44 +33,38 @@ jobs:
           echo "Qt installed at: $(brew --prefix qt@6)"
           echo "Qt version: $(brew list --versions qt@6)"
 
-      - name: Configure CMake
+      - name: Build LocalVTT with Qt bundling
         run: |
-          mkdir -p build
-          cd build
-          cmake .. \
-            -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} \
-            -DCMAKE_PREFIX_PATH=$(brew --prefix qt@6) \
-            -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64" \
-            -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0
-        env:
-          CMAKE_OSX_ARCHITECTURES: "x86_64;arm64"  # Universal binary
-
-      - name: Build LocalVTT
-        run: |
-          cd build
-          cmake --build . --config ${{ env.BUILD_TYPE }} -j$(sysctl -n hw.ncpu)
+          chmod +x scripts/build-ci-macos.sh
+          ./scripts/build-ci-macos.sh
 
       - name: Verify build
         run: |
           echo "=== Build verification ==="
           if [ -d "build/LocalVTT.app" ]; then
-            echo "LocalVTT.app bundle created successfully"
+            echo "✓ LocalVTT.app bundle created successfully"
             ls -la build/LocalVTT.app/Contents/MacOS/
             file build/LocalVTT.app/Contents/MacOS/LocalVTT
             echo "Architecture info:"
-            lipo -info build/LocalVTT.app/Contents/MacOS/LocalVTT || true
+            lipo -info build/LocalVTT.app/Contents/MacOS/LocalVTT || echo "Single architecture build"
           else
             echo "ERROR: LocalVTT.app not found!"
             ls -la build/
             exit 1
           fi
 
-      - name: Run basic tests
+      - name: Verify Qt bundling
         run: |
-          cd build
-          # Check if the app launches (will fail if missing dependencies)
-          ./LocalVTT.app/Contents/MacOS/LocalVTT --version || echo "Version flag not implemented"
-        continue-on-error: true
+          echo "=== Checking Qt bundling ==="
+          echo "Frameworks bundled:"
+          ls -1 build/LocalVTT.app/Contents/Frameworks/*.framework 2>/dev/null | wc -l
+          echo "Libraries bundled:"
+          ls -1 build/LocalVTT.app/Contents/Frameworks/*.dylib 2>/dev/null | wc -l
+          echo "Plugins bundled:"
+          find build/LocalVTT.app/Contents/PlugIns -name '*.dylib' 2>/dev/null | wc -l
+          echo ""
+          echo "=== Checking for system Qt dependencies (should be none) ==="
+          otool -L build/LocalVTT.app/Contents/MacOS/LocalVTT | grep -i "homebrew\|/opt/\|/usr/local" || echo "✓ No system Qt dependencies found"
 
       - name: Package macOS app
         run: |
