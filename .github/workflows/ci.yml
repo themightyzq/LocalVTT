@@ -143,7 +143,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             qt6-base-dev \
-            qt6-svg-dev \
+            libqt6svg6-dev \
             libqt6opengl6-dev \
             cmake \
             build-essential
