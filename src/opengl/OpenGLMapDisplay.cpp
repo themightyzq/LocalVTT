@@ -207,8 +207,8 @@ bool OpenGLMapDisplay::loadTexture(const QImage& image)
         m_mapTexture.reset();
     }
 
-    // Create texture (use flipped instead of deprecated mirrored)
-    m_mapTexture = std::make_unique<QOpenGLTexture>(image.flipped(Qt::Vertical));
+    // Create texture (flip vertically for OpenGL texture coordinates)
+    m_mapTexture = std::make_unique<QOpenGLTexture>(image.mirrored(false, true));
     m_mapTexture->setMinificationFilter(QOpenGLTexture::Linear);
     m_mapTexture->setMagnificationFilter(QOpenGLTexture::Linear);
     m_mapTexture->setWrapMode(QOpenGLTexture::ClampToEdge);
