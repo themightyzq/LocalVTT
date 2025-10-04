@@ -54,7 +54,8 @@ cd "$BUILD_DIR"
 cmake .. \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_PREFIX_PATH="$QT_PREFIX" \
-    -DUSE_MACDEPLOYQT=OFF
+    -DUSE_MACDEPLOYQT=OFF \
+    -DSKIP_CODESIGN=ON
 
 # Detect CPU count
 CPU_COUNT=$(sysctl -n hw.ncpu)

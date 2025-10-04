@@ -339,6 +339,7 @@ if(APPLE)
     # For development, we'll use the system Qt from Homebrew
     # Only enable this for distribution builds
     set(USE_MACDEPLOYQT OFF CACHE BOOL "Use macdeployqt for deployment (causes issues in development)")
+    set(SKIP_CODESIGN OFF CACHE BOOL "Skip code signing during CMake build (for CI builds that sign separately)")
 
     if(USE_MACDEPLOYQT)
         find_program(MACDEPLOYQT_EXECUTABLE NAMES macdeployqt
@@ -362,11 +363,15 @@ if(APPLE)
         endif()
     else()
         message(STATUS "macdeployqt disabled for development builds (USE_MACDEPLOYQT=OFF)")
-        # Just re-sign without bundling frameworks
-        add_custom_command(TARGET LocalVTT POST_BUILD
-            COMMENT "Re-signing app bundle..."
-            COMMAND codesign --force --sign - "$<TARGET_BUNDLE_DIR:LocalVTT>"
-        )
+        # Only re-sign if not skipping (CI builds handle signing separately)
+        if(NOT SKIP_CODESIGN)
+            add_custom_command(TARGET LocalVTT POST_BUILD
+                COMMENT "Re-signing app bundle..."
+                COMMAND codesign --force --sign - "$<TARGET_BUNDLE_DIR:LocalVTT>"
+            )
+        else()
+            message(STATUS "Code signing skipped (SKIP_CODESIGN=ON) - CI build will sign after Qt bundling")
+        endif()
     endif()
 
 elseif(WIN32)

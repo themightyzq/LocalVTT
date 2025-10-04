@@ -95,9 +95,9 @@ QString GridOverlay::getGridInfo() const
     return QString("%1 Grid: %2px = %3 ft (%4\" on screen @ %5 DPI)")
            .arg(gridTypeName)
            .arg(m_gridSize)
-           .arg(m_feetPerSquare, 'f', 1)
-           .arg(scaleInches, 'f', 2)
-           .arg(m_pixelsPerInch, 'f', 0);
+           .arg(m_feetPerSquare, 0, 'f', 1)
+           .arg(scaleInches, 0, 'f', 2)
+           .arg(m_pixelsPerInch, 0, 'f', 0);
 }
 
 void GridOverlay::paintSquareGrid(QPainter* painter)
