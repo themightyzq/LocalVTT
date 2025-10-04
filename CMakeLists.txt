@@ -277,8 +277,10 @@ if(APPLE)
         MACOSX_BUNDLE_BUNDLE_NAME "LocalVTT"
         MACOSX_BUNDLE_BUNDLE_VERSION ${PROJECT_VERSION}
         MACOSX_BUNDLE_SHORT_VERSION_STRING ${PROJECT_VERSION}
-        INSTALL_RPATH "@loader_path/../Frameworks;@loader_path/../lib"
-        BUILD_WITH_INSTALL_RPATH TRUE
+        # Disable RPATH - we'll use @executable_path directly in the build script
+        BUILD_WITH_INSTALL_RPATH FALSE
+        SKIP_BUILD_RPATH TRUE
+        INSTALL_RPATH ""
     )
 
     # Deploy Qt plugins for macOS bundle

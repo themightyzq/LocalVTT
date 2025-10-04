@@ -35,29 +35,25 @@ int main(int argc, char *argv[])
     std::cerr << "Resources initialized" << std::endl;
     std::cerr.flush();
     // Ensure Qt can find platform/imageformat plugins even before QApplication constructs
-    // Prefer Homebrew Qt plugin paths to avoid codesign issues with bundled plugins
+    // Use ONLY bundled plugins for macOS .app bundle
 #if defined(Q_OS_MAC)
     {
         QStringList libPaths;
+        // macOS .app bundle structure: Contents/PlugIns/
+        QString appDir = QCoreApplication::applicationDirPath();
+        QString bundledPlugins = appDir + "/../PlugIns";
 
-        // Try common Homebrew locations (both Apple Silicon and Intel Mac)
-        QStringList brewPaths = {
-            "/opt/homebrew/share/qt/plugins",
-            "/opt/homebrew/opt/qt/share/qt/plugins",
-            "/usr/local/share/qt/plugins",
-            "/usr/local/opt/qt/share/qt/plugins"
-        };
-
-        for (const QString& path : brewPaths) {
-            if (QDir(path).exists()) {
-                libPaths << path;
-                debugLog << "Using Qt plugins from: " << path.toStdString() << std::endl;
-                break;
-            }
+        if (QDir(bundledPlugins).exists()) {
+            libPaths << bundledPlugins;
+            debugLog << "Using BUNDLED Qt plugins from: " << bundledPlugins.toStdString() << std::endl;
+        } else {
+            debugLog << "WARNING: Bundled plugins not found at: " << bundledPlugins.toStdString() << std::endl;
         }
 
+        // IMPORTANT: Clear all paths and use ONLY bundled plugins
         if (!libPaths.isEmpty()) {
-            QCoreApplication::setLibraryPaths(libPaths + QCoreApplication::libraryPaths());
+            QCoreApplication::setLibraryPaths(libPaths);
+            debugLog << "Library paths set to bundled plugins ONLY" << std::endl;
         }
     }
 #elif defined(Q_OS_WIN)
