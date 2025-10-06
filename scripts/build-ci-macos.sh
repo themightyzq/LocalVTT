@@ -84,7 +84,7 @@ PLUGINS_DIR="$BUILD_DIR/LocalVTT.app/Contents/PlugIns"
 RESOURCES_DIR="$BUILD_DIR/LocalVTT.app/Contents/Resources"
 
 # Qt frameworks to bundle
-# NOTE: QtDBus removed - not needed for GUI-only app (D-Bus is Linux IPC)
+# NOTE: QtDBus must be included even though unused - QtGui links to it
 QT_FRAMEWORKS=(
     "QtCore"
     "QtGui"
@@ -92,6 +92,7 @@ QT_FRAMEWORKS=(
     "QtOpenGL"
     "QtOpenGLWidgets"
     "QtSvg"
+    "QtDBus"
 )
 
 # Function to fix library paths
@@ -193,6 +194,7 @@ REQUIRED_LIBS=(
     "libgraphite2.3.2.1.dylib"
     "libintl.8.dylib"
     "libgthread-2.0.0.dylib"
+    "libdbus-1.3.dylib"
 )
 
 for lib in "${REQUIRED_LIBS[@]}"; do

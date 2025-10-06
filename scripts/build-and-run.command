@@ -131,6 +131,7 @@ mkdir -p "$PLUGINS_DIR/styles"
 mkdir -p "$RESOURCES_DIR"
 
 # List of Qt frameworks needed by the app
+# NOTE: QtDBus must be included even though unused - QtGui links to it
 QT_FRAMEWORKS=(
     "QtCore"
     "QtGui"
@@ -138,7 +139,7 @@ QT_FRAMEWORKS=(
     "QtOpenGL"
     "QtOpenGLWidgets"
     "QtSvg"
-    # QtDBus removed - not needed for GUI-only app
+    "QtDBus"
 )
 
 # Function to fix library paths in a binary
@@ -231,6 +232,7 @@ SEARCH_PATHS=(
     "$HOMEBREW_PREFIX/opt/pcre2/lib"
     "$HOMEBREW_PREFIX/opt/harfbuzz/lib"
     "$HOMEBREW_PREFIX/opt/freetype/lib"
+    "$HOMEBREW_PREFIX/opt/dbus/lib"
 )
 
 DEPENDENT_LIBS=(
@@ -250,6 +252,7 @@ DEPENDENT_LIBS=(
     "libgraphite2.*.dylib"
     "libintl.*.dylib"
     "libgthread-2.0.*.dylib"
+    "libdbus-1.*.dylib"
 )
 
 # Function to find and copy a library
