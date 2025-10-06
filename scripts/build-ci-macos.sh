@@ -84,6 +84,7 @@ PLUGINS_DIR="$BUILD_DIR/LocalVTT.app/Contents/PlugIns"
 RESOURCES_DIR="$BUILD_DIR/LocalVTT.app/Contents/Resources"
 
 # Qt frameworks to bundle
+# NOTE: QtDBus removed - not needed for GUI-only app (D-Bus is Linux IPC)
 QT_FRAMEWORKS=(
     "QtCore"
     "QtGui"
@@ -91,7 +92,6 @@ QT_FRAMEWORKS=(
     "QtOpenGL"
     "QtOpenGLWidgets"
     "QtSvg"
-    "QtDBus"
 )
 
 # Function to fix library paths

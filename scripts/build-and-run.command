@@ -138,7 +138,7 @@ QT_FRAMEWORKS=(
     "QtOpenGL"
     "QtOpenGLWidgets"
     "QtSvg"
-    "QtDBus"
+    # QtDBus removed - not needed for GUI-only app
 )
 
 # Function to fix library paths in a binary
