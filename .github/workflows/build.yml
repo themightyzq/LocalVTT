@@ -35,8 +35,8 @@ jobs:
 
       - name: Build LocalVTT with Qt bundling
         run: |
-          chmod +x scripts/build-ci-macos.sh
-          ./scripts/build-ci-macos.sh
+          chmod +x scripts/build-ci-macos-fixed.sh
+          ./scripts/build-ci-macos-fixed.sh
 
       - name: Verify build
         run: |
