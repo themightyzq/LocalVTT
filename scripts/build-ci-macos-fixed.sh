@@ -128,7 +128,7 @@ fix_qt_paths() {
     done
 
     # Fix dependent library references - check all possible locations
-    local deps=$(otool -L "$binary" | grep -E "(libicu|libpcre|libz|libpng|libharfbuzz|libfreetype|libglib|libdouble|libb2|libmd4c|libgraphite|libintl|libgthread|libdbus)" | awk '{print $1}')
+    local deps=$(otool -L "$binary" | grep -E "(libicu|libpcre|libz|libpng|libharfbuzz|libfreetype|libglib|libdouble|libb2|libmd4c|libgraphite|libintl|libgthread|libdbus|libjpeg|libtiff|libwebp)" | awk '{print $1}')
     for dep in $deps; do
         local dep_name=$(basename "$dep")
         if [[ "$dep" == @executable_path* ]]; then
@@ -147,6 +147,87 @@ fix_qt_paths() {
             "$HOMEBREW_PREFIX/opt/jpeg-turbo/lib/libjpeg.8.dylib" \
             "$binary" 2>/dev/null || true
     fi
+}
+
+# Function to fix plugin paths specifically for image format dependencies
+fix_plugin_paths() {
+    local plugin_dir="$1"
+    echo "Fixing plugin dependencies in $(basename $plugin_dir)..."
+
+    for plugin in "$plugin_dir"/*.dylib; do
+        if [ -f "$plugin" ]; then
+            local plugin_name=$(basename "$plugin")
+
+            # Fix libjpeg references (both Intel and Apple Silicon paths)
+            install_name_tool -change \
+                "/usr/local/opt/jpeg-turbo/lib/libjpeg.8.dylib" \
+                "@executable_path/../Frameworks/libjpeg.8.dylib" \
+                "$plugin" 2>/dev/null || true
+
+            install_name_tool -change \
+                "/opt/homebrew/opt/jpeg-turbo/lib/libjpeg.8.dylib" \
+                "@executable_path/../Frameworks/libjpeg.8.dylib" \
+                "$plugin" 2>/dev/null || true
+
+            # Fix libtiff references
+            install_name_tool -change \
+                "/usr/local/opt/libtiff/lib/libtiff.5.dylib" \
+                "@executable_path/../Frameworks/libtiff.5.dylib" \
+                "$plugin" 2>/dev/null || true
+
+            install_name_tool -change \
+                "/opt/homebrew/opt/libtiff/lib/libtiff.5.dylib" \
+                "@executable_path/../Frameworks/libtiff.5.dylib" \
+                "$plugin" 2>/dev/null || true
+
+            # Fix libwebp references
+            install_name_tool -change \
+                "/usr/local/opt/webp/lib/libwebp.7.dylib" \
+                "@executable_path/../Frameworks/libwebp.7.dylib" \
+                "$plugin" 2>/dev/null || true
+
+            install_name_tool -change \
+                "/opt/homebrew/opt/webp/lib/libwebp.7.dylib" \
+                "@executable_path/../Frameworks/libwebp.7.dylib" \
+                "$plugin" 2>/dev/null || true
+
+            # Fix libwebpmux references
+            install_name_tool -change \
+                "/usr/local/opt/webp/lib/libwebpmux.3.dylib" \
+                "@executable_path/../Frameworks/libwebpmux.3.dylib" \
+                "$plugin" 2>/dev/null || true
+
+            install_name_tool -change \
+                "/opt/homebrew/opt/webp/lib/libwebpmux.3.dylib" \
+                "@executable_path/../Frameworks/libwebpmux.3.dylib" \
+                "$plugin" 2>/dev/null || true
+
+            # Fix libwebpdemux references
+            install_name_tool -change \
+                "/usr/local/opt/webp/lib/libwebpdemux.2.dylib" \
+                "@executable_path/../Frameworks/libwebpdemux.2.dylib" \
+                "$plugin" 2>/dev/null || true
+
+            install_name_tool -change \
+                "/opt/homebrew/opt/webp/lib/libwebpdemux.2.dylib" \
+                "@executable_path/../Frameworks/libwebpdemux.2.dylib" \
+                "$plugin" 2>/dev/null || true
+
+            # Fix libsharpyuv references
+            install_name_tool -change \
+                "/usr/local/opt/webp/lib/libsharpyuv.0.dylib" \
+                "@executable_path/../Frameworks/libsharpyuv.0.dylib" \
+                "$plugin" 2>/dev/null || true
+
+            install_name_tool -change \
+                "/opt/homebrew/opt/webp/lib/libsharpyuv.0.dylib" \
+                "@executable_path/../Frameworks/libsharpyuv.0.dylib" \
+                "$plugin" 2>/dev/null || true
+
+            # Also run the general Qt path fixes
+            fix_qt_paths "$plugin"
+        fi
+    done
 }
 
 # Clean any previous deployment
@@ -202,6 +283,9 @@ SEARCH_PATHS=(
     "$HOMEBREW_PREFIX/opt/md4c/lib"
     "$HOMEBREW_PREFIX/opt/graphite2/lib"
     "$HOMEBREW_PREFIX/opt/dbus/lib"
+    "$HOMEBREW_PREFIX/opt/jpeg-turbo/lib"  # Add jpeg-turbo for JPEG support
+    "$HOMEBREW_PREFIX/opt/libtiff/lib"      # Add libtiff for TIFF support
+    "$HOMEBREW_PREFIX/opt/webp/lib"         # Add webp for WebP support
 )
 
 # Also search in Cellar for versioned libraries
@@ -229,6 +313,12 @@ REQUIRED_LIBS=(
     "libintl.*.dylib"
     "libgthread-2.0.*.dylib"
     "libdbus-1.*.dylib"
+    "libjpeg.*.dylib"        # JPEG support for DD2VTT files
+    "libtiff.*.dylib"        # TIFF support
+    "libwebp.*.dylib"        # WebP support
+    "libwebpmux.*.dylib"     # WebP mux support
+    "libwebpdemux.*.dylib"   # WebP demux support
+    "libsharpyuv.*.dylib"    # WebP sharp YUV support
 )
 
 # Function to find and copy a library
@@ -368,6 +458,16 @@ if [ -f "$QT_PLUGINS_DIR/styles/libqmacstyle.dylib" ]; then
     if [ -f "$PLUGINS_DIR/styles/libqmacstyle.dylib" ]; then
         fix_qt_paths "$PLUGINS_DIR/styles/libqmacstyle.dylib"
     fi
+fi
+
+# Fix plugin paths for image format dependencies (JPEG, TIFF, WebP)
+echo ""
+echo "Fixing image plugin dependencies..."
+fix_plugin_paths "$PLUGINS_DIR/imageformats"
+fix_plugin_paths "$PLUGINS_DIR/platforms"
+fix_plugin_paths "$PLUGINS_DIR/iconengines"
+if [ -d "$PLUGINS_DIR/styles" ]; then
+    fix_plugin_paths "$PLUGINS_DIR/styles"
 fi
 
 # Fix main executable
