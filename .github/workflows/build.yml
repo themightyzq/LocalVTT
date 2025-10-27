@@ -74,7 +74,7 @@ jobs:
           echo "Package size: $(du -h LocalVTT-macOS-universal.zip | cut -f1)"
 
       - name: Upload macOS artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: LocalVTT-macOS-universal
           path: build/LocalVTT-macOS-universal.zip
@@ -141,7 +141,7 @@ jobs:
           Write-Host "Package size: $((Get-Item ..\LocalVTT-Windows-x64.zip).Length / 1MB) MB"
 
       - name: Upload Windows artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: LocalVTT-Windows-x64
           path: build/LocalVTT-Windows-x64.zip
@@ -263,7 +263,7 @@ jobs:
           echo "Package size: $(du -h LocalVTT-Linux-x64.tar.gz | cut -f1)"
 
       - name: Upload Linux artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: LocalVTT-Linux-x64
           path: build/LocalVTT-Linux-x64.tar.gz
@@ -271,7 +271,7 @@ jobs:
           if-no-files-found: error
 
       - name: Upload AppImage (if created)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: LocalVTT-Linux-AppImage
           path: LocalVTT*.AppImage
@@ -305,7 +305,7 @@ jobs:
           cat build-summary.md
 
       - name: Upload build summary
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: build-summary
           path: build-summary.md
