@@ -141,7 +141,7 @@ jobs:
           echo "PACKAGE_FILE=LocalVTT-${{ steps.version.outputs.VERSION }}-Linux-x64.tar.gz" >> $GITHUB_ENV
 
       - name: Upload release artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: ${{ matrix.artifact_name }}-${{ steps.version.outputs.VERSION }}
           path: build/${{ env.PACKAGE_FILE }}
