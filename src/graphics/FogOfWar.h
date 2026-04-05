@@ -5,12 +5,10 @@
 #include <QImage>
 #include <QSize>
 #include <QStack>
-#include <QMutex>
 #include <QPixmap>
 #include <functional>
 
 class QTimer;
-class WallSystem;
 
 class FogOfWar : public QGraphicsItem
 {
@@ -19,13 +17,10 @@ public:
     ~FogOfWar();
 
     void setMapSize(const QSize& size);
-    void setWallSystem(WallSystem* wallSystem) { m_wallSystem = wallSystem; }
     void revealArea(const QPointF& center, qreal radius);
     void hideArea(const QPointF& center, qreal radius);
     void revealRectangle(const QRectF& rect);
     void hideRectangle(const QRectF& rect);
-    void revealAreaWithWalls(const QPointF& center, qreal radius);
-    void revealRectangleWithWalls(const QRectF& rect);
     void revealAreaFeathered(const QPointF& center, qreal radius, qreal featherAmount = 0.3);
     void hideAreaFeathered(const QPointF& center, qreal radius, qreal featherAmount = 0.3);
     void clearAll();
@@ -41,6 +36,10 @@ public:
     
     // PRIORITY 4 FIX: Set callback for fog changes with dirty region support
     void setChangeCallback(std::function<void(const QRectF&)> callback) { m_changeCallback = callback; }
+
+    // Stroke boundary (call once at start/end of a painting operation)
+    void beginStroke();
+    void endStroke();
 
     // Undo/Redo system
     void pushState();
@@ -70,7 +69,6 @@ private:
     QImage m_fogMask;
     QColor m_fogColor;
     qreal m_fogOpacity;
-    WallSystem* m_wallSystem;
 
     // DM/Player differentiation
     qreal m_gmOpacity;
@@ -105,9 +103,6 @@ private:
     void invalidatePixmapCache();
     void updatePixmapCache();
     void optimizedPaintOperation(const QRectF& region, std::function<void(QPainter&)> paintFunc);
-
-    // Thread safety
-    mutable QMutex m_fogMutex;
 };
 
 #endif // FOGOFWAR_H

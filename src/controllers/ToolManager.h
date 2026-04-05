@@ -63,7 +63,7 @@ public:
 
     void attachGridSlider(QSlider* slider, QLabel* label);
     void attachFogBrushSlider(QSlider* slider, QLabel* label);
-    void attachFogToolActions(QAction* unifiedFog, QAction* drawPen, QAction* drawEraser);
+    void attachFogToolActions(QAction* unifiedFog);
     void attachUndoRedoActions(QAction* undo, QAction* redo);
 
 signals:
@@ -96,8 +96,6 @@ private:
     QLabel* m_fogBrushLabel;
 
     QAction* m_unifiedFogAction;
-    QAction* m_drawPenAction;
-    QAction* m_drawEraserAction;
     QAction* m_undoAction;
     QAction* m_redoAction;
 

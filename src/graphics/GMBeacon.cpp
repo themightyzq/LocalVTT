@@ -1,4 +1,5 @@
 #include "graphics/GMBeacon.h"
+#include "graphics/ZLayers.h"
 #include <QPainter>
 #include <QPen>
 #include <QBrush>
@@ -11,10 +12,10 @@ GMBeacon::GMBeacon(const QPointF& position, QGraphicsItem* parent)
     , m_animationProgress(0.0)
     , m_animation(nullptr)
     , m_maxRadius(60.0) // Default fallback radius
-    , m_beaconColor(0, 255, 255, 255) // Bright cyan for high visibility
+    , m_beaconColor(255, 70, 70, 255) // Red - default beacon color (brighter)
 {
     setPos(position);
-    setZValue(1000); // Above everything else
+    setZValue(ZLayer::Beacons);
 
     // Create the animation
     m_animation = new QPropertyAnimation(this, "animationProgress");
@@ -32,19 +33,19 @@ GMBeacon::GMBeacon(const QPointF& position, QGraphicsItem* parent)
         deleteLater();
     });
 
-    startAnimation();
+    // NOTE: Don't auto-start - caller must call startAnimation() after setColor()
 }
 
-GMBeacon::GMBeacon(const QPointF& position, qreal viewportWidth, QGraphicsItem* parent)
+GMBeacon::GMBeacon(const QPointF& position, qreal mapDimension, QGraphicsItem* parent)
     : QGraphicsItem(parent)
     , m_position(position)
     , m_animationProgress(0.0)
     , m_animation(nullptr)
-    , m_maxRadius(viewportWidth * DEFAULT_RADIUS_PERCENT)
-    , m_beaconColor(0, 255, 255, 255) // Bright cyan for high visibility
+    , m_maxRadius(mapDimension * DEFAULT_RADIUS_PERCENT)
+    , m_beaconColor(255, 70, 70, 255) // Red - default beacon color (brighter)
 {
     setPos(position);
-    setZValue(1000); // Above everything else
+    setZValue(ZLayer::Beacons);
 
     // Create the animation
     m_animation = new QPropertyAnimation(this, "animationProgress");
@@ -62,7 +63,7 @@ GMBeacon::GMBeacon(const QPointF& position, qreal viewportWidth, QGraphicsItem* 
         deleteLater();
     });
 
-    startAnimation();
+    // NOTE: Don't auto-start - caller must call startAnimation() after setColor()
 }
 
 GMBeacon::~GMBeacon()
@@ -86,7 +87,15 @@ void GMBeacon::paint(QPainter* painter, const QStyleOptionGraphicsItem* option, 
 
     painter->setRenderHint(QPainter::Antialiasing, true);
 
-    // Draw multiple expanding rings for a more dynamic effect
+    // Calculate perceived luminance (0-1 scale) using standard coefficients
+    // Bright colors (yellow, white, green) have high luminance; dark colors (red, blue, purple) have low
+    qreal luminance = 0.299 * m_beaconColor.redF() + 0.587 * m_beaconColor.greenF() + 0.114 * m_beaconColor.blueF();
+
+    // Boost opacity for darker colors - darker colors get up to 1.5x opacity boost
+    // luminance=1.0 (white) -> boost=1.0, luminance=0.0 (black) -> boost=1.5
+    qreal opacityBoost = 1.0 + (1.0 - luminance) * 0.5;
+
+    // Draw multiple expanding rings - color stays vibrant, only opacity fades
     for (int ring = 0; ring < RING_COUNT; ++ring) {
         // Calculate ring-specific animation progress with delay
         qreal ringDelay = ring * 0.15; // Stagger the rings
@@ -97,56 +106,51 @@ void GMBeacon::paint(QPainter* painter, const QStyleOptionGraphicsItem* option, 
         // Calculate radius for this ring
         qreal radius = ringProgress * m_maxRadius * (1.0 - ring * 0.15);
 
-        // Calculate opacity (fade out as it expands)
-        qreal opacity = BASE_OPACITY * (1.0 - ringProgress) * (1.0 - ring * 0.3);
+        // Calculate opacity - stay bright for first 40%, then fade to transparent
+        qreal fadeStart = 0.4;  // Stay at full opacity until 40% through animation
+        qreal fadeProgress = qMax(0.0, (ringProgress - fadeStart) / (1.0 - fadeStart));
+        qreal baseOpacity = BASE_OPACITY * (1.0 - fadeProgress) * (1.0 - ring * 0.2);
+        qreal opacity = qMin(1.0, baseOpacity * opacityBoost);  // Apply boost, cap at 1.0
 
-        // Draw the ring with strong outline
+        // Thick colored ring - NO black outline (that causes the "turning black" effect)
         QColor ringColor = m_beaconColor;
         ringColor.setAlphaF(opacity);
-
-        // Strong black outline for contrast
-        QPen outlinePen(Qt::black, 6.0 - ring);
-        painter->setPen(outlinePen);
+        QPen colorPen(ringColor, 5.0 - ring);
+        painter->setPen(colorPen);
         painter->setBrush(Qt::NoBrush);
         painter->drawEllipse(QPointF(0, 0), radius, radius);
 
-        // Bright colored ring
-        QPen colorPen(ringColor, 4.0 - ring);
-        painter->setPen(colorPen);
-        painter->drawEllipse(QPointF(0, 0), radius, radius);
-
-        // Inner filled circle (only for the first ring)
+        // Filled glow for first ring
         if (ring == 0) {
             QColor fillColor = m_beaconColor;
-            fillColor.setAlphaF(opacity * 0.3);
+            fillColor.setAlphaF(qMin(1.0, opacity * 0.5));  // Slightly more visible glow
             painter->setBrush(QBrush(fillColor));
             painter->setPen(Qt::NoPen);
-            painter->drawEllipse(QPointF(0, 0), radius * 0.3, radius * 0.3);
+            painter->drawEllipse(QPointF(0, 0), radius * 0.5, radius * 0.5);
         }
     }
 
-    // Draw center point that pulses with strong contrast
+    // Draw center point that pulses - stays the selected color
     qreal pulseFactor = 0.5 + 0.5 * sin(m_animationProgress * M_PI * 4);
-    qreal centerRadius = 6.0 + pulseFactor * 4.0; // Larger center point
-    qreal centerOpacity = BASE_OPACITY * (1.0 - m_animationProgress * 0.5); // Less fade
+    qreal centerRadius = 8.0 + pulseFactor * 6.0; // Larger, more visible center
+    // Center stays at full opacity for first 50%, then fades slowly
+    qreal centerFadeStart = 0.5;
+    qreal centerFadeProgress = qMax(0.0, (m_animationProgress - centerFadeStart) / (1.0 - centerFadeStart));
+    qreal baseCenterOpacity = BASE_OPACITY * (1.0 - centerFadeProgress * 0.5); // Only fades to 50% at end
+    qreal centerOpacity = qMin(1.0, baseCenterOpacity * opacityBoost);  // Apply boost to center too
 
-    // Black outline for center
-    painter->setPen(QPen(Qt::black, 3.0));
-    painter->setBrush(Qt::NoBrush);
-    painter->drawEllipse(QPointF(0, 0), centerRadius + 2, centerRadius + 2);
-
-    // Bright colored center
+    // Solid colored center - NO black outline
     QColor centerColor = m_beaconColor;
     centerColor.setAlphaF(centerOpacity);
     painter->setPen(Qt::NoPen);
     painter->setBrush(QBrush(centerColor));
     painter->drawEllipse(QPointF(0, 0), centerRadius, centerRadius);
 
-    // Bright white core
-    QColor brightColor = Qt::white;
-    brightColor.setAlphaF(centerOpacity);
-    painter->setBrush(QBrush(brightColor));
-    painter->drawEllipse(QPointF(0, 0), centerRadius * 0.4, centerRadius * 0.4);
+    // White highlight in center for visibility
+    QColor highlightColor = Qt::white;
+    highlightColor.setAlphaF(centerOpacity * 0.7);
+    painter->setBrush(QBrush(highlightColor));
+    painter->drawEllipse(QPointF(0, 0), centerRadius * 0.3, centerRadius * 0.3);
 }
 
 void GMBeacon::startAnimation()
@@ -160,4 +164,42 @@ void GMBeacon::setAnimationProgress(qreal progress)
 {
     m_animationProgress = progress;
     update();
+}
+
+void GMBeacon::setColor(const QColor& color)
+{
+    m_beaconColor = color;
+    update();
+}
+
+QList<QColor> GMBeacon::presetColors()
+{
+    // Full color palette - bright, high-visibility colors
+    // Darker colors made brighter for better visibility
+    return {
+        QColor(255, 70, 70),     // Red - brighter coral-red
+        QColor(100, 170, 255),   // Blue - bright sky blue
+        QColor(255, 255, 0),     // Yellow - bright yellow (already high luminance)
+        QColor(0, 255, 0),       // Green - bright green (already high luminance)
+        QColor(255, 160, 50),    // Orange - bright orange
+        QColor(220, 130, 255),   // Purple - bright lavender-purple
+        QColor(255, 255, 255),   // White
+        QColor(200, 200, 200),   // Grey - lighter grey for visibility
+        QColor(80, 80, 80)       // Black - dark grey instead of pure black
+    };
+}
+
+QString GMBeacon::colorName(const QColor& color)
+{
+    // Match against presets and return name
+    if (color == QColor(255, 70, 70)) return "Red";
+    if (color == QColor(100, 170, 255)) return "Blue";
+    if (color == QColor(255, 255, 0)) return "Yellow";
+    if (color == QColor(0, 255, 0)) return "Green";
+    if (color == QColor(255, 160, 50)) return "Orange";
+    if (color == QColor(220, 130, 255)) return "Purple";
+    if (color == QColor(255, 255, 255)) return "White";
+    if (color == QColor(200, 200, 200)) return "Grey";
+    if (color == QColor(80, 80, 80)) return "Black";
+    return "Custom";
 }

@@ -10,7 +10,11 @@
 #include <QProcess>
 
 // Use Q_GLOBAL_STATIC for thread-safe, lazy initialization without recursion issues
+QT_WARNING_PUSH
+QT_WARNING_DISABLE_CLANG("-Wvariadic-macro-arguments-omitted")
+QT_WARNING_DISABLE_GCC("-Wvariadic-macro-arguments-omitted")
 Q_GLOBAL_STATIC(DebugConsole, g_debugConsoleInstance)
+QT_WARNING_POP
 
 DebugConsole* DebugConsole::instance()
 {

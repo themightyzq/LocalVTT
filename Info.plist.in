@@ -3,13 +3,13 @@
 <plist version="1.0">
 <dict>
     <key>CFBundleExecutable</key>
-    <string>LocalVTT</string>
+    <string>ProjectVTT</string>
     <key>CFBundleIdentifier</key>
-    <string>com.wng.localvtt</string>
+    <string>com.wng.projectvtt</string>
     <key>CFBundleName</key>
     <string>${MACOSX_BUNDLE_BUNDLE_NAME}</string>
     <key>CFBundleDisplayName</key>
-    <string>LocalVTT</string>
+    <string>Project VTT</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleVersion</key>

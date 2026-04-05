@@ -5,7 +5,11 @@
 #include <QGlobalStatic>
 
 // Use Q_GLOBAL_STATIC for thread-safe, lazy initialization without recursion issues
+QT_WARNING_PUSH
+QT_WARNING_DISABLE_CLANG("-Wvariadic-macro-arguments-omitted")
+QT_WARNING_DISABLE_GCC("-Wvariadic-macro-arguments-omitted")
 Q_GLOBAL_STATIC(SettingsManager, g_settingsManagerInstance)
+QT_WARNING_POP
 
 SettingsManager& SettingsManager::instance()
 {
@@ -14,7 +18,7 @@ SettingsManager& SettingsManager::instance()
 
 SettingsManager::SettingsManager()
 {
-    m_settings = new QSettings("LocalVTT", "LocalVTT");
+    m_settings = new QSettings("ProjectVTT", "ProjectVTT");
 }
 
 void SettingsManager::saveWindowGeometry(const QString& windowName, const QRect& geometry)
@@ -142,7 +146,7 @@ void SettingsManager::saveGMBeaconColor(const QColor& color)
 
 QColor SettingsManager::loadGMBeaconColor()
 {
-    return m_settings->value("gmBeacon/color", QColor(74, 158, 255)).value<QColor>();
+    return m_settings->value("gmBeacon/color", QColor(255, 70, 70)).value<QColor>();  // Red default (brighter)
 }
 
 void SettingsManager::saveGMBeaconShape(int shape)

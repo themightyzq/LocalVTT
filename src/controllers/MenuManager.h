@@ -87,8 +87,6 @@ private:
 
     // Fog tool actions for synchronization
     QAction* m_unifiedFogAction;
-    QAction* m_drawPenAction;
-    QAction* m_drawEraserAction;
 
     static const int MaxRecentFiles = 10;
     QList<QAction*> m_recentFileActions;

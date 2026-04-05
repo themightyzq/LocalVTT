@@ -288,14 +288,6 @@ QColor CustomCursors::getFogModeColor(FogToolMode mode, bool isOutline)
             // The actual behavior (reveal vs hide) is determined at runtime
             return isOutline ? QColor(0, 255, 0) : QColor(100, 255, 100, 80);
 
-        case FogToolMode::DrawPen:
-            // Drawing pen mode - white/transparent
-            return isOutline ? Qt::white : QColor(255, 255, 255, 80);
-
-        case FogToolMode::DrawEraser:
-            // Eraser mode - red for removal
-            return isOutline ? QColor(255, 0, 0) : QColor(255, 100, 100, 80);
-
         default:
             return isOutline ? Qt::white : QColor(255, 255, 255, 80);
     }

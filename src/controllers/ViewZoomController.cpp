@@ -2,9 +2,12 @@
 #include "graphics/MapDisplay.h"
 #include "ui/PlayerWindow.h"
 #include "graphics/FogOfWar.h"
+#include "ui/DarkTheme.h"
 #include "utils/DebugConsole.h"
 #include <QAction>
 #include <QLabel>
+#include <QToolBar>
+#include <QSpinBox>
 
 ViewZoomController::ViewZoomController(QObject *parent)
     : QObject(parent)
@@ -153,4 +156,64 @@ void ViewZoomController::togglePlayerViewMode()
         emit requestStatus("Player View Mode OFF - GM view restored");
         DebugConsole::info("Player view mode disabled", "View");
     }
+}
+
+QSpinBox* ViewZoomController::createToolbarActions(QToolBar* toolbar)
+{
+    // Zoom Out
+    QAction* zoomOutAction = new QAction(QIcon(":/icons/zoom_out.svg"), "Zoom Out", toolbar);
+    zoomOutAction->setToolTip("<b>Zoom Out</b><br><i>Shortcut: -</i>");
+    zoomOutAction->setShortcut(QKeySequence("-"));
+    zoomOutAction->setShortcutContext(Qt::ApplicationShortcut);
+    connect(zoomOutAction, &QAction::triggered, this, &ViewZoomController::zoomOut);
+    toolbar->addAction(zoomOutAction);
+
+    // Zoom In
+    QAction* zoomInAction = new QAction(QIcon(":/icons/zoom_in.svg"), "Zoom In", toolbar);
+    zoomInAction->setToolTip("<b>Zoom In</b><br><i>Shortcut: + or =</i>");
+    zoomInAction->setShortcut(QKeySequence("="));
+    zoomInAction->setShortcutContext(Qt::ApplicationShortcut);
+    connect(zoomInAction, &QAction::triggered, this, &ViewZoomController::zoomIn);
+    toolbar->addAction(zoomInAction);
+
+    // Hidden + shortcut (added to parent window, not toolbar)
+    QWidget* parentWindow = toolbar->parentWidget();
+    if (parentWindow) {
+        QAction* zoomInPlus = new QAction(parentWindow);
+        zoomInPlus->setShortcut(QKeySequence("+"));
+        zoomInPlus->setShortcutContext(Qt::ApplicationShortcut);
+        connect(zoomInPlus, &QAction::triggered, this, &ViewZoomController::zoomIn);
+        parentWindow->addAction(zoomInPlus);
+    }
+
+    // Fit to View
+    QAction* zoomFitAction = new QAction(QIcon(":/icons/zoom_fit.svg"), "Fit", toolbar);
+    zoomFitAction->setToolTip("<b>Fit to View</b><br>Fit entire map to window<br><i>Shortcut: /</i>");
+    zoomFitAction->setShortcut(QKeySequence("/"));
+    zoomFitAction->setShortcutContext(Qt::ApplicationShortcut);
+    connect(zoomFitAction, &QAction::triggered, this, &ViewZoomController::fitToScreen);
+    toolbar->addAction(zoomFitAction);
+
+    // Store actions for setZoomActions
+    setZoomActions(zoomFitAction, zoomInAction, zoomOutAction);
+
+    // Zoom spinner
+    QLabel* zoomLabel = new QLabel("Zoom:", toolbar);
+    zoomLabel->setStyleSheet(QString("color: %1; font-size: %2px; font-weight: 500; padding: 0 4px;")
+        .arg(DarkTheme::hex(DarkTheme::TextPrimary))
+        .arg(DarkTheme::FontBase));
+    toolbar->addWidget(zoomLabel);
+
+    QSpinBox* zoomSpinner = new QSpinBox(toolbar);
+    zoomSpinner->setMinimum(10);
+    zoomSpinner->setMaximum(500);
+    zoomSpinner->setValue(100);
+    zoomSpinner->setSuffix("%");
+    zoomSpinner->setSingleStep(5);
+    zoomSpinner->setFixedWidth(85);
+    zoomSpinner->setToolTip("<b>Zoom Level</b><br>Adjust map zoom percentage<br>Range: 10-500%");
+    zoomSpinner->setStyleSheet(DarkTheme::spinBoxStyle());
+    toolbar->addWidget(zoomSpinner);
+
+    return zoomSpinner;
 }

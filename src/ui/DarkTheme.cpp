@@ -404,4 +404,147 @@ QString getScrollBarStyleSheet()
     )";
 }
 
+QString toolBarStyle()
+{
+    return QString(
+        "QToolBar {"
+        "  background: %1; border: none; spacing: %2px; padding: %3px;"
+        "}"
+        "QToolBar::separator {"
+        "  background: %4; width: 1px; margin: 4px 8px;"
+        "}"
+    ).arg(hex(BgPrimary),
+          QString::number(SpaceTight),
+          QString::number(SpaceBase),
+          rgba(TextPrimary, 0.08));
+}
+
+QString toolButtonStyle()
+{
+    return QString(
+        "QToolButton {"
+        "  background: %1; border: 1px solid %2; border-radius: %3px;"
+        "  padding: 8px; min-width: 32px; min-height: 32px;"
+        "  color: %4; font-size: %5px;"
+        "}"
+        "QToolButton:hover:enabled {"
+        "  background: %6; border-color: %7;"
+        "}"
+        "QToolButton:pressed:enabled {"
+        "  background: %8;"
+        "}"
+        "QToolButton:checked {"
+        "  background: %9; border-color: %10; color: white;"
+        "}"
+        "QToolButton:disabled {"
+        "  background: %11; border-color: %12; color: %13;"
+        "}"
+        "QToolButton:focus {"
+        "  outline: 2px solid %10; outline-offset: 2px;"
+        "}"
+    ).arg(rgba(TextPrimary, 0.05),    // 1: bg
+          rgba(TextPrimary, 0.1),      // 2: border
+          QString::number(RadiusBase), // 3: radius
+          hex(TextPrimary),            // 4: text
+          QString::number(FontBase),   // 5: font
+          rgba(AccentPrimary, 0.15),   // 6: hover bg
+          rgba(AccentPrimary, 0.3),    // 7: hover border
+          rgba(AccentPrimary, 0.25),   // 8: pressed bg
+          rgba(AccentPrimary, 0.3))    // 9: checked bg
+     .arg(hex(AccentPrimary),          // 10: checked border / focus
+          rgba(TextPrimary, 0.02),     // 11: disabled bg
+          rgba(TextPrimary, 0.05),     // 12: disabled border
+          rgba(TextPrimary, 0.3));     // 13: disabled text
+}
+
+QString dangerButtonStyle()
+{
+    return QString(
+        "QToolButton {"
+        "  background: %1; border: 1px solid %2; border-radius: %3px;"
+        "  padding: 8px; min-width: 32px; min-height: 32px;"
+        "  color: %4; font-size: %5px;"
+        "}"
+        "QToolButton:hover:enabled {"
+        "  background: %6; border-color: %7;"
+        "}"
+        "QToolButton:disabled {"
+        "  background: %8; border-color: %9; color: %10;"
+        "}"
+    ).arg(rgba(AccentDanger, 0.15),    // 1: bg
+          rgba(AccentDanger, 0.3),     // 2: border
+          QString::number(RadiusBase), // 3: radius
+          "#ff6b6b",                   // 4: text (bright red)
+          QString::number(FontBase),   // 5: font
+          rgba(AccentDanger, 0.3),     // 6: hover bg
+          rgba(AccentDanger, 0.5),     // 7: hover border
+          rgba(TextPrimary, 0.02),     // 8: disabled bg
+          rgba(TextPrimary, 0.05),     // 9: disabled border
+          rgba(TextPrimary, 0.3));     // 10: disabled text
+}
+
+QString successButtonStyle()
+{
+    return QString(
+        "QToolButton {"
+        "  background: %1; border: 1px solid %2; border-radius: %3px;"
+        "  padding: 8px; min-width: 32px; min-height: 32px;"
+        "  color: %4; font-size: %5px; font-weight: bold;"
+        "}"
+        "QToolButton:hover:enabled {"
+        "  background: %6; border-color: %7;"
+        "}"
+        "QToolButton:checked {"
+        "  background: %6; border-color: %7; color: %4;"
+        "}"
+        "QToolButton:disabled {"
+        "  background: %8; border-color: %9; color: %10;"
+        "}"
+    ).arg(rgba(AccentSuccess, 0.3),    // 1: bg
+          rgba(AccentSuccess, 0.5),    // 2: border
+          QString::number(RadiusBase), // 3: radius
+          "#6bffb8",                   // 4: text (bright green)
+          QString::number(FontBase),   // 5: font
+          rgba(AccentSuccess, 0.4),    // 6: hover/checked bg
+          rgba(AccentSuccess, 0.6),    // 7: hover/checked border
+          rgba(TextPrimary, 0.02),     // 8: disabled bg
+          rgba(TextPrimary, 0.05),     // 9: disabled border
+          rgba(TextPrimary, 0.3));     // 10: disabled text
+}
+
+QString spinBoxStyle()
+{
+    return QString(
+        "QSpinBox {"
+        "  background: %1; border: 1px solid %2; border-radius: %3px;"
+        "  padding: 4px 8px; color: %4; font-size: %5px;"
+        "  min-width: 60px; max-width: 85px;"
+        "}"
+        "QSpinBox:hover {"
+        "  background: %6; border-color: %7;"
+        "}"
+        "QSpinBox:focus {"
+        "  border-color: %8;"
+        "}"
+        "QSpinBox::up-button, QSpinBox::down-button {"
+        "  background: %1; border: 1px solid %2; width: 20px;"
+        "}"
+        "QSpinBox::up-button:hover, QSpinBox::down-button:hover {"
+        "  background: %6;"
+        "}"
+        "QSpinBox:disabled {"
+        "  background: %9; color: %10;"
+        "}"
+    ).arg(rgba(TextPrimary, 0.05),    // 1: bg
+          rgba(TextPrimary, 0.1),      // 2: border
+          QString::number(RadiusSmall),// 3: radius
+          hex(TextPrimary),            // 4: text
+          QString::number(FontBase),   // 5: font
+          rgba(TextPrimary, 0.08),     // 6: hover bg
+          rgba(AccentPrimary, 0.3),    // 7: hover border
+          hex(AccentPrimary),          // 8: focus border
+          hex(BgPrimary),              // 9: disabled bg
+          hex(TextDisabled));          // 10: disabled text
+}
+
 }

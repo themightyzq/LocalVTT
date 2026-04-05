@@ -1,4 +1,5 @@
 #include "graphics/PingIndicator.h"
+#include "graphics/ZLayers.h"
 #include <QPen>
 #include <QBrush>
 #include <QGraphicsScene>
@@ -14,7 +15,7 @@ PingIndicator::PingIndicator(const QPointF& position, QGraphicsItem* parent)
     setBrush(QBrush(QColor(0, 255, 255, 80)));
     setPen(pen);
 
-    setZValue(10);
+    setZValue(ZLayer::Beacons);
     setOpacity(1.0);
 
     m_opacityAnimation->setDuration(ANIMATION_DURATION);

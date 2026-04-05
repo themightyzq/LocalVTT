@@ -7,6 +7,7 @@
 #include <QLabel>
 #include "utils/FogToolMode.h"
 
+class QToolBar;
 enum class FogToolMode;
 class MapDisplay;
 
@@ -14,6 +15,19 @@ class FogToolsController : public QObject {
     Q_OBJECT
 public:
     explicit FogToolsController(QObject* parent = nullptr);
+
+    struct FogToolbarActions {
+        QAction* fogModeToggle = nullptr;
+        QAction* hideToggle = nullptr;
+        QAction* brushTool = nullptr;
+        QAction* rectTool = nullptr;
+        QAction* resetFog = nullptr;
+        QAction* lockFog = nullptr;
+    };
+
+    // Create fog toolbar actions and add them to the given toolbar.
+    // Returns pointers so the caller can wire additional connections.
+    FogToolbarActions createToolbarActions(QToolBar* toolbar, QAction* fogToggleAction);
 
     void setDisplay(MapDisplay* display);
 

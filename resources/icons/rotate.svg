@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
+  <!-- Clockwise rotation arrow -->
+  <path d="M 12 4 A 8 8 0 1 1 4 12" fill="none" stroke="#E0E0E0" stroke-width="2" stroke-linecap="round"/>
+  <!-- Arrow head -->
+  <path d="M 12 4 L 16 4 L 12 8 Z" fill="#E0E0E0"/>
+</svg>

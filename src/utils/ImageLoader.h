@@ -38,6 +38,9 @@ private:
 
     // Helper for progress reporting
     void reportProgress(int percentage, const QString& status);
+
+    // Reentrancy guard for loadImageWithProgress (uses processEvents)
+    bool m_isLoading = false;
 };
 
 #endif // IMAGELOADER_H

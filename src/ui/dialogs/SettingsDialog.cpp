@@ -20,7 +20,7 @@
 #include <QFormLayout>
 
 // Define static default colors
-const QColor SettingsDialog::DEFAULT_GM_BEACON_COLOR = QColor(74, 158, 255); // Accent blue
+const QColor SettingsDialog::DEFAULT_GM_BEACON_COLOR = QColor(255, 70, 70); // Red - default beacon color (brighter)
 const QColor SettingsDialog::DEFAULT_GRID_COLOR = QColor(255, 255, 255, 128); // Semi-transparent white
 
 SettingsDialog::SettingsDialog(QWidget *parent)
@@ -63,7 +63,7 @@ SettingsDialog::SettingsDialog(QWidget *parent)
     , m_resetButton(nullptr)
     , m_colorDialog(nullptr)
 {
-    setWindowTitle("LocalVTT Preferences");
+    setWindowTitle("Project VTT Preferences");
     setModal(true);
     setMinimumSize(500, 400);
     resize(600, 500);

@@ -1,5 +1,6 @@
 #include "ui/ToolboxWidget.h"
 #include "utils/AnimationHelper.h"
+#include "graphics/GMBeacon.h"
 #include <QAction>
 #include <QScrollArea>
 #include <QVBoxLayout>
@@ -196,6 +197,8 @@ ToolboxWidget::ToolboxWidget(QWidget* parent)
     , m_fogToolMode(FogToolMode::UnifiedFog)
     , m_expanded(false)
     , m_hovered(false)
+    , m_beaconColor(255, 70, 70)  // Red default (brighter)
+    , m_beaconColorGroup(nullptr)
     , m_mapDisplay(nullptr)
     , m_playerWindow(nullptr)
     , m_liveRegion(nullptr)
@@ -218,7 +221,7 @@ ToolboxWidget::ToolboxWidget(QWidget* parent)
     setMaximumWidth(scaledWidth);
     setFixedWidth(scaledWidth);  // Fixed width - no resizing
     setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea);
-    setFeatures(QDockWidget::DockWidgetMovable);
+    setFeatures(QDockWidget::DockWidgetClosable | QDockWidget::DockWidgetMovable);
 
     m_widthAnimation = new QPropertyAnimation(this, "geometry", this);
     m_widthAnimation->setDuration(m_reducedMotion ? 0 : ANIMATION_DURATION);
@@ -288,8 +291,9 @@ void ToolboxWidget::setupUI()
 
     // Quick access bar removed - duplicate functionality
 
-    // Minimal toolbox with only fog controls
-    createFogSection();     // Only fog controls shown
+    // Minimal toolbox with fog and beacon controls
+    createFogSection();
+    createBeaconSection();
 
     m_mainLayout->addStretch();
 
@@ -450,6 +454,93 @@ void ToolboxWidget::createFogSection()
     m_mainLayout->addWidget(m_fogSection);
 }
 
+void ToolboxWidget::createBeaconSection()
+{
+    m_beaconSection = new ToolSection("Beacon Color", this);
+    m_beaconSection->setCollapsible(true);
+
+    // Create color button group for exclusive selection
+    m_beaconColorGroup = new QButtonGroup(this);
+    m_beaconColorGroup->setExclusive(true);
+
+    // Create a horizontal layout for color buttons
+    QWidget* colorWidget = new QWidget();
+    QHBoxLayout* colorLayout = new QHBoxLayout(colorWidget);
+    colorLayout->setContentsMargins(8, 8, 8, 8);
+    colorLayout->setSpacing(6);
+
+    // Get preset colors from GMBeacon
+    QList<QColor> colors = GMBeacon::presetColors();
+
+    for (int i = 0; i < colors.size(); ++i) {
+        const QColor& color = colors[i];
+        QString colorName = GMBeacon::colorName(color);
+
+        QToolButton* colorButton = new QToolButton(this);
+        colorButton->setCheckable(true);
+        colorButton->setToolTip(colorName);
+        colorButton->setAccessibleName(QString("Beacon color: %1").arg(colorName));
+        colorButton->setFixedSize(32, 32);
+
+        // Style with the color as background
+        QString buttonStyle = QString(
+            "QToolButton {"
+            "   background: %1;"
+            "   border: 2px solid rgba(255, 255, 255, 0.3);"
+            "   border-radius: 4px;"
+            "}"
+            "QToolButton:hover {"
+            "   border: 2px solid rgba(255, 255, 255, 0.6);"
+            "}"
+            "QToolButton:checked {"
+            "   border: 3px solid #ffffff;"
+            "}"
+        ).arg(color.name());
+
+        colorButton->setStyleSheet(buttonStyle);
+
+        // Check the default color (cyan)
+        if (color == m_beaconColor) {
+            colorButton->setChecked(true);
+        }
+
+        m_beaconColorGroup->addButton(colorButton, i);
+        m_beaconColorButtons.append(colorButton);
+        colorLayout->addWidget(colorButton);
+    }
+
+    colorLayout->addStretch();
+
+    // Connect button group signal
+    connect(m_beaconColorGroup, &QButtonGroup::idClicked, this, [this](int id) {
+        QList<QColor> colors = GMBeacon::presetColors();
+        if (id >= 0 && id < colors.size()) {
+            setBeaconColor(colors[id]);
+        }
+    });
+
+    m_beaconSection->addWidget(colorWidget);
+    m_mainLayout->addWidget(m_beaconSection);
+}
+
+void ToolboxWidget::setBeaconColor(const QColor& color)
+{
+    if (m_beaconColor == color) return;
+
+    m_beaconColor = color;
+
+    // Update button states to match
+    QList<QColor> colors = GMBeacon::presetColors();
+    for (int i = 0; i < colors.size() && i < m_beaconColorButtons.size(); ++i) {
+        m_beaconColorButtons[i]->setChecked(colors[i] == color);
+    }
+
+    emit beaconColorChanged(color);
+
+    // Announce for accessibility
+    announceValueChange(QString("Beacon color changed to %1").arg(GMBeacon::colorName(color)));
+}
+
 // History section removed - Undo/Redo functionality moved to Edit menu
 
 // View section removed - Zoom controls via keyboard only
@@ -593,28 +684,15 @@ void ToolboxWidget::paintEvent(QPaintEvent* event)
 
 void ToolboxWidget::keyPressEvent(QKeyEvent* event)
 {
-    // Keyboard navigation shortcuts
-    if (event->key() == Qt::Key_F6) {
-        // Navigate to fog section
-        if (m_revealRectangleButton) {
-            m_revealRectangleButton->setFocus();
-        }
-    } else if (event->key() == Qt::Key_Escape) {
+    // F6 removed - unnecessary shortcut (CLAUDE.md UI consistency)
+    if (event->key() == Qt::Key_Escape) {
         // Collapse fog section
         if (m_fogSection) {
             m_fogSection->setExpanded(false);
         }
         updateToolboxWidth();
-    } else if (event->modifiers() & Qt::AltModifier) {
-        // Alt+1,2,3 for brush size presets - removed
-        // Direct slider value setting instead
-        if (event->key() == Qt::Key_1) {
-            m_fogBrushSlider->setValue(25);
-        } else if (event->key() == Qt::Key_2) {
-            m_fogBrushSlider->setValue(50);
-        } else if (event->key() == Qt::Key_3) {
-            m_fogBrushSlider->setValue(100);
-        }
+    // CLAUDE.md 3.6: NO modifier combos (Alt+Click, etc.)
+    // Alt+1,2,3 brush size presets removed per CLAUDE.md compliance
     } else {
         QDockWidget::keyPressEvent(event);
     }
@@ -780,8 +858,6 @@ QString ToolboxWidget::getFogToolModeText(FogToolMode mode) const
 {
     switch (mode) {
         case FogToolMode::UnifiedFog: return "Unified Fog Tool";
-        case FogToolMode::DrawPen: return "Drawing Pen";
-        case FogToolMode::DrawEraser: return "Drawing Eraser";
         default: return "Unknown";
     }
 }

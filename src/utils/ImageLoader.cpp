@@ -18,6 +18,10 @@ ImageLoader::ImageLoader(QObject* parent)
 
 QImage ImageLoader::loadImageWithProgress(const QString& path)
 {
+    // Reentrancy guard — processEvents() below can cause reentrant load calls
+    if (m_isLoading) return QImage();
+    m_isLoading = true;
+
     reportProgress(0, "Starting image load...");
 
     // Get file size to determine if we need chunked loading
@@ -46,9 +50,11 @@ QImage ImageLoader::loadImageWithProgress(const QString& path)
 
         if (!vttData.mapImage.isNull()) {
             reportProgress(100, "VTT file loaded successfully");
+            m_isLoading = false;
             return vttData.mapImage;
         } else {
             reportProgress(100, "Failed to load VTT file");
+            m_isLoading = false;
             return QImage();
         }
     } else {
@@ -57,6 +63,12 @@ QImage ImageLoader::loadImageWithProgress(const QString& path)
 
         QImageReader reader(path);
         reader.setAutoTransform(true);
+
+        // Protect against extremely large images (e.g. 50000x50000)
+        QSize imageSize = reader.size();
+        if (imageSize.isValid() && (imageSize.width() > 16384 || imageSize.height() > 16384)) {
+            reader.setScaledSize(imageSize.scaled(16384, 16384, Qt::KeepAspectRatio));
+        }
 
         // For very large files, enable incremental reading
         if (fileSize > LARGE_FILE_THRESHOLD) {
@@ -69,6 +81,7 @@ QImage ImageLoader::loadImageWithProgress(const QString& path)
         // Check if the format is supported before attempting to read
         if (!reader.canRead()) {
             reportProgress(100, "Unsupported image format");
+            m_isLoading = false;
             return QImage();
         }
 
@@ -111,6 +124,7 @@ QImage ImageLoader::loadImageWithProgress(const QString& path)
             reportProgress(100, QString("Failed to load image: %1").arg(errorString));
         }
 
+        m_isLoading = false;
         return image;
     }
 }

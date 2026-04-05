@@ -21,5 +21,12 @@
     <file alias="icons/reset.svg">icons/reset.svg</file>
     <file alias="icons/pan.svg">icons/pan.svg</file>
     <file alias="icons/pointer.svg">icons/pointer.svg</file>
+    <file alias="icons/zoom_in.svg">icons/zoom_in.svg</file>
+    <file alias="icons/zoom_out.svg">icons/zoom_out.svg</file>
+    <file alias="icons/zoom_fit.svg">icons/zoom_fit.svg</file>
+    <file alias="icons/center.svg">icons/center.svg</file>
+    <file alias="icons/lock.svg">icons/lock.svg</file>
+    <file alias="icons/unlock.svg">icons/unlock.svg</file>
+    <file alias="icons/rotate.svg">icons/rotate.svg</file>
   </qresource>
 </RCC>

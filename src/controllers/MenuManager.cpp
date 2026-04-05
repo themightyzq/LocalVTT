@@ -35,8 +35,6 @@ MenuManager::MenuManager(MainWindow* mainWindow, QObject* parent)
     , m_openPreferencesAction(nullptr)
     , m_clearRecentAction(nullptr)
     , m_unifiedFogAction(nullptr)
-    , m_drawPenAction(nullptr)
-    , m_drawEraserAction(nullptr)
 {
 }
 
@@ -126,7 +124,7 @@ void MenuManager::createViewMenu()
     m_viewMenu->addSeparator();
 
     m_fitToScreenAction = new QAction("&Fit to Screen", m_mainWindow);
-    m_fitToScreenAction->setShortcut(QKeySequence("0"));
+    // No shortcut here - MainWindow toolbar has the authoritative shortcut with ApplicationShortcut context
     connect(m_fitToScreenAction, &QAction::triggered, this, &MenuManager::fitToScreenRequested);
     m_viewMenu->addAction(m_fitToScreenAction);
 
@@ -147,9 +145,10 @@ void MenuManager::createToolsMenu()
 {
     m_toolsMenu = m_mainWindow->menuBar()->addMenu("&Tools");
 
+    // Measurement tool - shortcut removed (not implemented in v1.0, CLAUDE.md UI consistency)
     QAction* measurementAction = new QAction("&Measurement Tool", m_mainWindow);
     measurementAction->setCheckable(true);
-    measurementAction->setShortcut(QKeySequence("M"));
+    measurementAction->setEnabled(false);  // Disable - not implemented
     m_toolsMenu->addAction(measurementAction);
 
     m_toolsMenu->addSeparator();
@@ -204,7 +203,7 @@ void MenuManager::createHelpMenu()
 
     m_helpMenu->addSeparator();
 
-    QAction* aboutAction = new QAction("&About LocalVTT", m_mainWindow);
+    QAction* aboutAction = new QAction("&About Project VTT", m_mainWindow);
     connect(aboutAction, &QAction::triggered, this, &MenuManager::showAboutRequested);
     m_helpMenu->addAction(aboutAction);
 }
@@ -214,41 +213,22 @@ void MenuManager::createFogSubmenu(QMenu* parentMenu)
     QMenu* fogToolsMenu = parentMenu->addMenu("Fog &Tools");
 
     // Single unified fog tool action
+    // NOTE: No shortcut here - 'F' is reserved for the main Fog Mode toggle in toolbar
     m_unifiedFogAction = new QAction("&Unified Fog Tool", m_mainWindow);
-    m_unifiedFogAction->setShortcut(QKeySequence("F"));
     m_unifiedFogAction->setCheckable(true);
     m_unifiedFogAction->setStatusTip("Use Shift for hide, Alt for rectangle selection");
     connect(m_unifiedFogAction, &QAction::triggered, this, [this]() {
         emit fogToolModeChanged(FogToolMode::UnifiedFog);
     });
     fogToolsMenu->addAction(m_unifiedFogAction);
-
-    fogToolsMenu->addSeparator();
-
-    // Drawing tools (preserved for drawing system)
-    m_drawPenAction = new QAction("&Draw Pen", m_mainWindow);
-    m_drawPenAction->setShortcut(QKeySequence("P"));
-    m_drawPenAction->setCheckable(true);
-    connect(m_drawPenAction, &QAction::triggered, this, [this]() {
-        emit fogToolModeChanged(FogToolMode::DrawPen);
-    });
-    fogToolsMenu->addAction(m_drawPenAction);
-
-    m_drawEraserAction = new QAction("&Draw Eraser", m_mainWindow);
-    m_drawEraserAction->setShortcut(QKeySequence("E"));
-    m_drawEraserAction->setCheckable(true);
-    connect(m_drawEraserAction, &QAction::triggered, this, [this]() {
-        emit fogToolModeChanged(FogToolMode::DrawEraser);
-    });
-    fogToolsMenu->addAction(m_drawEraserAction);
 }
 
 void MenuManager::createGridSubmenu(QMenu* parentMenu)
 {
     QMenu* gridConfigMenu = parentMenu->addMenu("Grid &Configuration");
 
+    // Grid Info - shortcut removed (use calibration dialog, CLAUDE.md UI consistency)
     QAction* gridInfoAction = new QAction("Show Grid &Info", m_mainWindow);
-    gridInfoAction->setShortcut(QKeySequence("Ctrl+I"));
     gridConfigMenu->addAction(gridInfoAction);
 
     gridConfigMenu->addSeparator();
@@ -315,19 +295,11 @@ void MenuManager::updateFogToolMenuState(FogToolMode mode)
 {
     // Clear all fog tool action checked states first
     if (m_unifiedFogAction) m_unifiedFogAction->setChecked(false);
-    if (m_drawPenAction) m_drawPenAction->setChecked(false);
-    if (m_drawEraserAction) m_drawEraserAction->setChecked(false);
 
     // Set the appropriate action as checked based on the current mode
     switch (mode) {
         case FogToolMode::UnifiedFog:
             if (m_unifiedFogAction) m_unifiedFogAction->setChecked(true);
-            break;
-        case FogToolMode::DrawPen:
-            if (m_drawPenAction) m_drawPenAction->setChecked(true);
-            break;
-        case FogToolMode::DrawEraser:
-            if (m_drawEraserAction) m_drawEraserAction->setChecked(true);
             break;
         default:
             break;

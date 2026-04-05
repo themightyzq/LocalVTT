@@ -11,6 +11,12 @@ set(CMAKE_AUTOUIC ON)
 # Add build timestamp
 string(TIMESTAMP BUILD_TIMESTAMP "%Y-%m-%d %H:%M:%S UTC" UTC)
 add_compile_definitions(BUILD_TIMESTAMP="${BUILD_TIMESTAMP}")
+add_compile_definitions(APP_VERSION="${PROJECT_VERSION}")
+
+# Enable Objective-C++ on macOS (for MusicRemote_mac.mm)
+if(APPLE)
+    enable_language(OBJCXX)
+endif()
 
 # Platform-specific configuration for macOS
 if(APPLE)
@@ -24,29 +30,14 @@ if(APPLE)
     set(WrapOpenGL_AGL "" CACHE INTERNAL "")
 endif()
 
-# Set Qt6 path for macOS if not already provided by user
-if(APPLE AND NOT DEFINED CMAKE_PREFIX_PATH)
-    # Try common Homebrew locations as fallback only if user hasn't set CMAKE_PREFIX_PATH
-    # Using /opt/homebrew/opt/qt and /usr/local/opt/qt which are symlinks to current versions
-    if(EXISTS "/opt/homebrew/opt/qt")
-        set(CMAKE_PREFIX_PATH "/opt/homebrew/opt/qt" CACHE STRING "Qt6 installation path")
-        message(STATUS "Found Qt at /opt/homebrew/opt/qt (Apple Silicon)")
-    elseif(EXISTS "/usr/local/opt/qt")
-        set(CMAKE_PREFIX_PATH "/usr/local/opt/qt" CACHE STRING "Qt6 installation path")
-        message(STATUS "Found Qt at /usr/local/opt/qt (Intel Mac)")
-    elseif(EXISTS "/opt/homebrew/opt/qt@6")
-        set(CMAKE_PREFIX_PATH "/opt/homebrew/opt/qt@6" CACHE STRING "Qt6 installation path")
-        message(STATUS "Found Qt at /opt/homebrew/opt/qt@6 (versioned formula)")
-    elseif(EXISTS "/usr/local/opt/qt@6")
-        set(CMAKE_PREFIX_PATH "/usr/local/opt/qt@6" CACHE STRING "Qt6 installation path")
-        message(STATUS "Found Qt at /usr/local/opt/qt@6 (versioned formula)")
-    else()
-        message(STATUS "Qt path not found in standard Homebrew locations, CMake will search system paths")
-    endif()
+# Set Qt6 path explicitly for macOS
+if(APPLE)
+    # Qt6 found via CMAKE_PREFIX_PATH or system paths
+    # For local dev: cmake -DCMAKE_PREFIX_PATH=$(brew --prefix qt) ..
 endif()
 
 # Find Qt6 components
-find_package(Qt6 REQUIRED COMPONENTS Core Widgets Gui OpenGL OpenGLWidgets Svg)
+find_package(Qt6 REQUIRED COMPONENTS Core Widgets Gui OpenGL Svg Multimedia)
 
 # Get Qt plugin directory for deployment
 if(Qt6_FOUND)
@@ -61,51 +52,11 @@ if(Qt6_FOUND)
     endif()
 endif()
 
-# Try to find plugins directory using platform-appropriate fallbacks
+# Also try to find plugins in the share/qt directory (common on Homebrew)
 if(NOT QT_PLUGINS_DIR OR NOT EXISTS "${QT_PLUGINS_DIR}")
-    if(APPLE)
-        # Try common Homebrew plugin locations (version-agnostic)
-        foreach(plugin_path
-            "/opt/homebrew/share/qt/plugins"
-            "/opt/homebrew/opt/qt/share/qt/plugins"
-            "/usr/local/share/qt/plugins"
-            "/usr/local/opt/qt/share/qt/plugins"
-            "/opt/homebrew/opt/qt@6/share/qt/plugins"
-            "/usr/local/opt/qt@6/share/qt/plugins")
-            if(EXISTS "${plugin_path}")
-                set(QT_PLUGINS_DIR "${plugin_path}")
-                message(STATUS "Found Qt plugins directory: ${QT_PLUGINS_DIR}")
-                break()
-            endif()
-        endforeach()
-    elseif(WIN32)
-        # Windows: Try to find plugins relative to Qt installation
-        get_target_property(QT_CORE_LOCATION Qt6::Core LOCATION)
-        if(QT_CORE_LOCATION)
-            get_filename_component(QT_BIN_DIR "${QT_CORE_LOCATION}" DIRECTORY)
-            set(QT_PLUGINS_DIR "${QT_BIN_DIR}/../plugins")
-            if(EXISTS "${QT_PLUGINS_DIR}")
-                message(STATUS "Found Qt plugins directory: ${QT_PLUGINS_DIR}")
-            endif()
-        endif()
-    elseif(UNIX AND NOT APPLE)
-        # Linux: Try common installation paths
-        foreach(plugin_path
-            "/usr/lib/qt6/plugins"
-            "/usr/lib64/qt6/plugins"
-            "/usr/lib/x86_64-linux-gnu/qt6/plugins"
-            "/usr/local/lib/qt6/plugins"
-            "${CMAKE_PREFIX_PATH}/plugins")
-            if(EXISTS "${plugin_path}")
-                set(QT_PLUGINS_DIR "${plugin_path}")
-                message(STATUS "Found Qt plugins directory: ${QT_PLUGINS_DIR}")
-                break()
-            endif()
-        endforeach()
-    endif()
-
-    if(NOT QT_PLUGINS_DIR OR NOT EXISTS "${QT_PLUGINS_DIR}")
-        message(WARNING "Qt plugins directory not found. Plugin deployment may not work correctly.")
+    set(QT_PLUGINS_DIR "${QT_PLUGINS_DIR_FALLBACK}")
+    if(EXISTS "${QT_PLUGINS_DIR}")
+        message(STATUS "Using alternate Qt plugins directory: ${QT_PLUGINS_DIR}")
     endif()
 endif()
 
@@ -116,42 +67,49 @@ set(SOURCES
     src/ui/PlayerWindow.cpp
     src/ui/ToolboxWidget.cpp
     src/ui/dialogs/SettingsDialog.cpp
+    src/ui/dialogs/LightEditDialog.cpp
+    src/ui/dialogs/SavePresetDialog.cpp
     src/ui/ToastNotification.cpp
     src/ui/LoadingOverlay.cpp
+    src/ui/KeyboardShortcutsOverlay.cpp
     src/ui/DebugConsoleWidget.cpp
     src/ui/DarkTheme.cpp
     src/ui/widgets/ToolStatusWidget.cpp
+    src/ui/widgets/ThumbnailCache.cpp
+    src/ui/widgets/MapBrowserWidget.cpp
+    src/ui/widgets/ColorPickerButton.cpp
+    src/ui/AtmosphereToolboxWidget.cpp
     src/graphics/MapDisplay.cpp
     src/graphics/MouseInputManager.cpp
-    src/graphics/ZoomManager.cpp
-    src/graphics/SceneManager.cpp
-    src/graphics/MapImageManager.cpp
+    src/graphics/SceneBuilder.cpp
+    src/graphics/SceneAnimationDriver.cpp
     src/graphics/GridOverlay.cpp
     src/graphics/FogOfWar.cpp
-    src/graphics/WallSystem.cpp
-    src/graphics/PortalSystem.cpp
-    src/graphics/Portal.cpp
     src/graphics/PingIndicator.cpp
     src/graphics/GMBeacon.cpp
     src/graphics/LightingOverlay.cpp
+    src/graphics/WeatherEffect.cpp
+    src/graphics/FogMistEffect.cpp
+    src/graphics/LightningEffect.cpp
+    src/graphics/PointLightSystem.cpp
     src/graphics/ZoomIndicator.cpp
     src/graphics/LoadingProgressWidget.cpp
     src/graphics/ToolOverlayWidget.cpp
     src/graphics/ImageCache.cpp
-    src/opengl/OpenGLMapDisplay.cpp
-    src/opengl/ShaderManager.cpp
-    src/opengl/PostProcessingSystem.cpp
+    src/audio/AmbientPlayer.cpp
+    src/audio/MusicRemote.cpp
     src/utils/ImageLoader.cpp
     src/utils/VTTLoader.cpp
     src/utils/MapSession.cpp
     src/utils/SettingsManager.cpp
     src/utils/CustomCursors.cpp
     src/utils/ErrorHandler.cpp
+    src/utils/LogHandler.cpp
     src/utils/DebugConsole.cpp
     src/utils/ActionRegistry.cpp
     src/utils/MemoryManager.cpp
     src/utils/AnimationHelper.cpp
-    src/utils/SecureWindowRegistry.cpp
+    src/utils/CustomPresetManager.cpp
     src/controllers/RecentFilesController.cpp
     src/controllers/TabsController.cpp
     src/controllers/FogAutosaveController.cpp
@@ -163,6 +121,8 @@ set(SOURCES
     src/controllers/LightingController.cpp
     src/controllers/ViewZoomController.cpp
     src/controllers/PlayerWindowController.cpp
+    src/controllers/AtmosphereManager.cpp
+    src/controllers/AtmosphereController.cpp
 )
 
 set(HEADERS
@@ -170,30 +130,37 @@ set(HEADERS
     src/ui/PlayerWindow.h
     src/ui/ToolboxWidget.h
     src/ui/dialogs/SettingsDialog.h
+    src/ui/dialogs/LightEditDialog.h
+    src/ui/dialogs/SavePresetDialog.h
     src/ui/ToastNotification.h
     src/ui/LoadingOverlay.h
+    src/ui/KeyboardShortcutsOverlay.h
     src/ui/DebugConsoleWidget.h
     src/ui/DarkTheme.h
     src/ui/widgets/ToolStatusWidget.h
+    src/ui/widgets/ThumbnailCache.h
+    src/ui/widgets/MapBrowserWidget.h
+    src/ui/widgets/ColorPickerButton.h
+    src/ui/AtmosphereToolboxWidget.h
     src/graphics/MapDisplay.h
     src/graphics/MouseInputManager.h
-    src/graphics/ZoomManager.h
-    src/graphics/SceneManager.h
-    src/graphics/MapImageManager.h
+    src/graphics/SceneBuilder.h
+    src/graphics/SceneAnimationDriver.h
     src/graphics/GridOverlay.h
     src/graphics/FogOfWar.h
-    src/graphics/WallSystem.h
-    src/graphics/PortalSystem.h
-    src/graphics/Portal.h
     src/graphics/PingIndicator.h
     src/graphics/GMBeacon.h
     src/graphics/LightingOverlay.h
+    src/graphics/WeatherEffect.h
+    src/graphics/FogMistEffect.h
+    src/graphics/LightningEffect.h
+    src/graphics/PointLight.h
+    src/graphics/PointLightSystem.h
     src/graphics/ZoomIndicator.h
     src/graphics/LoadingProgressWidget.h
     src/graphics/ToolOverlayWidget.h
-    src/opengl/OpenGLMapDisplay.h
-    src/opengl/ShaderManager.h
-    src/opengl/PostProcessingSystem.h
+    src/audio/AmbientPlayer.h
+    src/audio/MusicRemote.h
     src/utils/ImageLoader.h
     src/utils/VTTLoader.h
     src/utils/MapSession.h
@@ -201,11 +168,13 @@ set(HEADERS
     src/utils/FogToolMode.h
     src/utils/CustomCursors.h
     src/utils/ErrorHandler.h
+    src/utils/LogHandler.h
     src/utils/DebugConsole.h
     src/utils/ActionRegistry.h
     src/utils/ToolType.h
     src/utils/MemoryManager.h
     src/utils/AnimationHelper.h
+    src/utils/CustomPresetManager.h
     src/controllers/RecentFilesController.h
     src/controllers/TabsController.h
     src/controllers/FogAutosaveController.h
@@ -217,16 +186,24 @@ set(HEADERS
     src/controllers/LightingController.h
     src/controllers/ViewZoomController.h
     src/controllers/PlayerWindowController.h
+    src/controllers/AtmosphereState.h
+    src/controllers/AtmospherePreset.h
+    src/controllers/AtmosphereManager.h
+    src/controllers/AtmosphereController.h
 )
 
-# Resources temporarily disabled due to Qt rcc symbol issues
-# qt6_add_resources(RESOURCES
-#     resources/icons.qrc
-#     resources/shaders.qrc
-# )
+# macOS-only Objective-C++ sources
+if(APPLE)
+    list(APPEND SOURCES src/audio/MusicRemote_mac.mm)
+endif()
+
+# Qt Resources for icons
+qt6_add_resources(RESOURCES
+    resources/icons.qrc
+)
 
 # Create executable
-add_executable(LocalVTT ${SOURCES} ${HEADERS})
+add_executable(LocalVTT ${SOURCES} ${HEADERS} ${RESOURCES})
 
 # Make headers discoverable for nested includes
 target_include_directories(LocalVTT PRIVATE
@@ -236,9 +213,17 @@ target_include_directories(LocalVTT PRIVATE
     ${CMAKE_SOURCE_DIR}/src/ui/dialogs
     ${CMAKE_SOURCE_DIR}/src/ui/widgets
     ${CMAKE_SOURCE_DIR}/src/graphics
-    ${CMAKE_SOURCE_DIR}/src/opengl
+    ${CMAKE_SOURCE_DIR}/src/audio
     ${CMAKE_SOURCE_DIR}/src/utils
 )
+
+# Compiler warnings
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+    target_compile_options(LocalVTT PRIVATE
+        -Wall -Wextra -Wpedantic
+        -Wno-unused-parameter
+    )
+endif()
 
 # Link Qt libraries
 target_link_libraries(LocalVTT PRIVATE
@@ -246,8 +231,8 @@ target_link_libraries(LocalVTT PRIVATE
     Qt6::Widgets
     Qt6::Gui
     Qt6::OpenGL
-    Qt6::OpenGLWidgets
     Qt6::Svg
+    Qt6::Multimedia
 )
 
 # Platform-specific linking for macOS
@@ -274,13 +259,11 @@ if(APPLE)
     set_target_properties(LocalVTT PROPERTIES
         MACOSX_BUNDLE TRUE
         MACOSX_BUNDLE_INFO_PLIST ${CMAKE_SOURCE_DIR}/Info.plist.in
-        MACOSX_BUNDLE_BUNDLE_NAME "LocalVTT"
+        MACOSX_BUNDLE_BUNDLE_NAME "Project VTT"
         MACOSX_BUNDLE_BUNDLE_VERSION ${PROJECT_VERSION}
         MACOSX_BUNDLE_SHORT_VERSION_STRING ${PROJECT_VERSION}
-        # Disable RPATH - we'll use @executable_path directly in the build script
-        BUILD_WITH_INSTALL_RPATH FALSE
-        SKIP_BUILD_RPATH TRUE
-        INSTALL_RPATH ""
+        INSTALL_RPATH "@loader_path/../Frameworks;/opt/homebrew/lib"
+        BUILD_WITH_INSTALL_RPATH TRUE
     )
 
     # Deploy Qt plugins for macOS bundle
@@ -339,17 +322,9 @@ if(APPLE)
     # For development, we'll use the system Qt from Homebrew
     # Only enable this for distribution builds
     set(USE_MACDEPLOYQT OFF CACHE BOOL "Use macdeployqt for deployment (causes issues in development)")
-    set(SKIP_CODESIGN OFF CACHE BOOL "Skip code signing during CMake build (for CI builds that sign separately)")
 
     if(USE_MACDEPLOYQT)
-        find_program(MACDEPLOYQT_EXECUTABLE NAMES macdeployqt
-            PATHS
-                ${Qt6_DIR}/../../../bin
-                /opt/homebrew/opt/qt/bin
-                /opt/homebrew/opt/qt@6/bin
-                /usr/local/opt/qt/bin
-                /usr/local/opt/qt@6/bin
-                ${CMAKE_PREFIX_PATH}/bin)
+        find_program(MACDEPLOYQT_EXECUTABLE NAMES macdeployqt PATHS ${Qt6_DIR}/../../../bin /opt/homebrew/opt/qt@6/bin)
         if(MACDEPLOYQT_EXECUTABLE)
             add_custom_command(TARGET LocalVTT POST_BUILD
                 COMMENT "Running macdeployqt for complete deployment..."
@@ -363,15 +338,11 @@ if(APPLE)
         endif()
     else()
         message(STATUS "macdeployqt disabled for development builds (USE_MACDEPLOYQT=OFF)")
-        # Only re-sign if not skipping (CI builds handle signing separately)
-        if(NOT SKIP_CODESIGN)
-            add_custom_command(TARGET LocalVTT POST_BUILD
-                COMMENT "Re-signing app bundle..."
-                COMMAND codesign --force --sign - "$<TARGET_BUNDLE_DIR:LocalVTT>"
-            )
-        else()
-            message(STATUS "Code signing skipped (SKIP_CODESIGN=ON) - CI build will sign after Qt bundling")
-        endif()
+        # Just re-sign without bundling frameworks
+        add_custom_command(TARGET LocalVTT POST_BUILD
+            COMMENT "Re-signing app bundle..."
+            COMMAND codesign --force --sign - "$<TARGET_BUNDLE_DIR:LocalVTT>"
+        )
     endif()
 
 elseif(WIN32)

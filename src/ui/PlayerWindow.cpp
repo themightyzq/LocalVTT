@@ -1,12 +1,7 @@
 #include "ui/PlayerWindow.h"
 #include "graphics/MapDisplay.h"
-#include "graphics/FogOfWar.h"
-#include "graphics/SceneManager.h"
 #include "utils/SettingsManager.h"
 #include "utils/AnimationHelper.h"
-#include "utils/SecureWindowRegistry.h"
-#include <iostream>
-#include <QMutexLocker>
 #include <QMenuBar>
 #include <QStatusBar>
 #include <QPropertyAnimation>
@@ -18,6 +13,7 @@
 #include <QResizeEvent>
 #include <QScreen>
 #include <QApplication>
+#include <QGuiApplication>
 #include <QWindow>
 #include <QContextMenuEvent>
 #include <QMenu>
@@ -34,19 +30,18 @@ PlayerWindow::PlayerWindow(MapDisplay* sharedDisplay, QWidget *parent)
     , m_windowAnimation(nullptr)
     , m_currentScreen(nullptr)
     , m_autoFitEnabled(true)
+    , m_rotation(0)
     , m_blackoutOverlay(nullptr)
     , m_intermissionOverlay(nullptr)
     , m_intermissionLabel(nullptr)
     , m_privacyModeActive(false)
     , m_tripleClickTimer(new QTimer(this))
     , m_clickCount(0)
-    , m_refreshTimer(new QTimer(this))
-    , m_autoFitTimer(new QTimer(this))
 {
+    // Set object name for fog rendering detection
     setObjectName("PlayerWindow");
 
-    SecureWindowRegistry::instance().registerWindow(this, SecureWindowRegistry::PlayerWindow);
-
+    // Set window flags for better window management
     setWindowFlags(windowFlags() | Qt::Window);
 
     // Create a view that shares the same scene as the main window
@@ -69,61 +64,34 @@ PlayerWindow::PlayerWindow(MapDisplay* sharedDisplay, QWidget *parent)
     // Apply premium theme
     setEnhancedStyling();
 
-    // Apply themed menu bar
+    // CLAUDE.md COMPLIANCE: Player window has ZERO UI - Pure immersion
+    // Hide all UI elements for complete immersion
+    menuBar()->hide();  // Remove menu bar completely
+    statusBar()->hide(); // Remove status bar completely
 
-    // Minimal menu for player window
-    QMenu* viewMenu = menuBar()->addMenu("&View");
-
-    // Auto-Fit to Screen option
-    QAction* autoFitAction = new QAction("&Auto-Fit to Screen", this);
-    autoFitAction->setCheckable(true);
-    autoFitAction->setChecked(m_autoFitEnabled);
-    autoFitAction->setShortcut(QKeySequence("Ctrl+Shift+F"));
-    autoFitAction->setStatusTip("Automatically fit map to screen when window is moved to different monitor");
-    connect(autoFitAction, &QAction::toggled, [this](bool checked) {
-        m_autoFitEnabled = checked;
-        if (checked) {
-            autoFitToScreen();
-        }
-    });
-    viewMenu->addAction(autoFitAction);
-
-    QAction* fullScreenAction = new QAction("&Full Screen", this);
+    // Create invisible actions for keyboard shortcuts only
+    // F11 for fullscreen toggle
+    QAction* fullScreenAction = new QAction(this);
     fullScreenAction->setShortcut(QKeySequence("F11"));
     connect(fullScreenAction, &QAction::triggered, [this]() {
-        // CRITICAL FIX: Simple fullscreen toggle without complex animations that cause crashes
         if (isFullScreen()) {
             showNormal();
         } else {
             showFullScreen();
         }
     });
-    viewMenu->addAction(fullScreenAction);
+    addAction(fullScreenAction);  // Add to window without menu
 
-    viewMenu->addSeparator();
-
-    // Add window opacity control
-    QMenu* opacityMenu = viewMenu->addMenu("Window Opacity");
-    QStringList opacityLevels = {"100%", "90%", "80%", "70%"};
-    qreal opacityValues[] = {1.0, 0.9, 0.8, 0.7};
-
-    for (int i = 0; i < opacityLevels.size(); ++i) {
-        QAction* opacityAction = new QAction(opacityLevels[i], this);
-        qreal opacity = opacityValues[i];
-        connect(opacityAction, &QAction::triggered, [this, opacity]() {
-            // Use AnimationHelper for consistent timing (200ms per CLAUDE.md)
-            QPropertyAnimation* anim = new QPropertyAnimation(this, "windowOpacity");
-            anim->setDuration(AnimationHelper::FADE_DURATION);
-            anim->setStartValue(windowOpacity());
-            anim->setEndValue(opacity);
-            anim->setEasingCurve(AnimationHelper::smoothEasing());
-            anim->start(QAbstractAnimation::DeleteWhenStopped);
-        });
-        opacityMenu->addAction(opacityAction);
-    }
-
-    // Minimalist status bar with theme
-    statusBar()->showMessage("Player Display");
+    // Ctrl+Shift+F for auto-fit toggle (invisible)
+    QAction* autoFitAction = new QAction(this);
+    autoFitAction->setShortcut(QKeySequence("Ctrl+Shift+F"));
+    connect(autoFitAction, &QAction::triggered, [this]() {
+        m_autoFitEnabled = !m_autoFitEnabled;
+        if (m_autoFitEnabled) {
+            autoFitToScreen();
+        }
+    });
+    addAction(autoFitAction);  // Add to window without menu
     
     // Create privacy overlays
     createPrivacyOverlays();
@@ -133,13 +101,6 @@ PlayerWindow::PlayerWindow(MapDisplay* sharedDisplay, QWidget *parent)
     connect(m_tripleClickTimer, &QTimer::timeout, [this]() {
         m_clickCount = 0; // Reset count after timeout
     });
-
-    // PRIORITY 5 FIX: Setup consolidated refresh timers to prevent timer storms
-    m_refreshTimer->setSingleShot(true);
-    connect(m_refreshTimer, &QTimer::timeout, this, &PlayerWindow::forceRefresh);
-
-    m_autoFitTimer->setSingleShot(true);
-    connect(m_autoFitTimer, &QTimer::timeout, this, &PlayerWindow::autoFitToScreen);
 
     // Load window geometry from settings
     SettingsManager& settings = SettingsManager::instance();
@@ -161,16 +122,51 @@ PlayerWindow::~PlayerWindow()
     }
 }
 
+void PlayerWindow::updateDisplay()
+{
+    // Ensure the player view is sharing the latest scene and items
+    if (!m_playerView) return;
+
+    // Re-share to sync pointers to map and overlays after late loads
+    if (m_sharedDisplay) {
+        m_playerView->shareScene(m_sharedDisplay);
+    }
+
+    // Lightweight refresh
+    m_playerView->updateSharedScene();
+    m_playerView->update();
+    if (m_playerView->scene()) m_playerView->scene()->update();
+
+    // FIX: Reapply rotation after shareScene() reset the transform
+    // shareScene() calls resetTransform() + scale() which clears any rotation
+    if (m_rotation != 0) {
+        if (m_autoFitEnabled) {
+            autoFitToScreen();  // This already handles rotation
+        } else {
+            m_playerView->rotate(m_rotation);
+        }
+    }
+}
+
+void PlayerWindow::forceRefresh()
+{
+    // Force immediate scene refresh - calls updateDisplay() plus viewport repaint
+    updateDisplay();
+    if (m_playerView && m_playerView->viewport()) {
+        m_playerView->viewport()->repaint();
+    }
+}
+
 void PlayerWindow::setEnhancedStyling()
 {
     // Premium minimalist styling - let ThemeManager handle most of it
     // Only add window-specific enhancements here
     QString additionalStyle = QString(
         "QMainWindow {"
-        "   background: #1a1a1a;"
+        "   background: #000000;"
         "}"
         "QGraphicsView {"
-        "   background: #1a1a1a;"
+        "   background: #000000;"
         "   border: none;"
         "}"
     );
@@ -183,18 +179,15 @@ void PlayerWindow::showEvent(QShowEvent *event)
     // Don't animate on show - can cause crashes if scene is not ready
     setWindowOpacity(1.0);
 
-    // Store initial screen and ALWAYS auto-fit for TV display
+    // Store initial screen and auto-fit if enabled
     m_currentScreen = screen();
-    // CRITICAL FIX: Always fit to screen on show - this is a TV display
-    scheduleAutoFit();
+    if (m_autoFitEnabled) {
+        // Delay to ensure window is fully shown
+        QTimer::singleShot(500, this, &PlayerWindow::autoFitToScreen);
+    }
 
-    // CRITICAL FIX: Force full refresh when window is shown to prevent black screen and preserve fog
-    // Use immediate refresh to ensure fog is visible right away
-    forceRefresh();
-
-    // CRITICAL FIX: Also schedule another refresh shortly after to handle any timing issues
-    // This ensures fog is properly rendered even if the window manager hasn't finished setup
-    scheduleRefresh();
+    // Ensure player view is synced with the latest scene when the window becomes visible
+    updateDisplay();
 }
 
 void PlayerWindow::closeEvent(QCloseEvent *event)
@@ -215,21 +208,50 @@ void PlayerWindow::animateWindowTransition(bool showing)
 
 void PlayerWindow::syncZoom(qreal zoomLevel, const QPointF& centerPoint)
 {
-    // CRITICAL FIX: Player window NEVER syncs zoom from DM window
-    // Player window always maintains fit-to-screen for TV display
-    // DM can zoom freely without affecting player view
-    Q_UNUSED(zoomLevel);
-    Q_UNUSED(centerPoint);
-    // No-op: Player window ignores all zoom sync requests
+    // Only sync zoom if auto-fit is disabled
+    // When auto-fit is enabled, Player window maintains its own zoom
+    if (m_playerView && !m_autoFitEnabled) {
+        m_playerView->syncZoomLevel(zoomLevel, centerPoint);
+        // Reapply rotation after zoom sync (syncZoomLevel resets transform)
+        if (m_rotation != 0) {
+            m_playerView->rotate(m_rotation);
+        }
+    }
 }
 
 void PlayerWindow::fitToView()
 {
-    // CRITICAL FIX: Player window ALWAYS fits to screen
-    // This is the TV display - it should fill the screen at all times
-    if (m_playerView) {
+    // When called from DM window, only fit if auto-fit is disabled
+    // Otherwise Player window manages its own display
+    if (m_playerView && !m_autoFitEnabled) {
         m_playerView->fitMapToView();
+        // Reapply rotation after fit (fitMapToView resets transform)
+        if (m_rotation != 0) {
+            m_playerView->rotate(m_rotation);
+        }
     }
+}
+
+void PlayerWindow::syncViewFromDM(qreal zoomLevel, const QPointF& centerPoint)
+{
+    // DM explicitly wants to show players a specific view
+    // Disable auto-fit and sync to DM's zoom/pan
+    m_autoFitEnabled = false;
+
+    if (m_playerView) {
+        m_playerView->syncZoomLevel(zoomLevel, centerPoint);
+        // Reapply rotation after zoom sync (syncZoomLevel resets transform)
+        if (m_rotation != 0) {
+            m_playerView->rotate(m_rotation);
+        }
+    }
+}
+
+void PlayerWindow::resetToAutoFit()
+{
+    // Return to auto-fit mode
+    m_autoFitEnabled = true;
+    autoFitToScreen();
 }
 
 void PlayerWindow::updateToolCursor()
@@ -247,10 +269,6 @@ void PlayerWindow::moveEvent(QMoveEvent *event)
 
     // Check if we moved to a different monitor
     checkForMonitorChange();
-
-    // CRITICAL FIX: Ensure fog persists after window move
-    // Use a small delay to let the window settle
-    scheduleRefresh();
 }
 
 void PlayerWindow::resizeEvent(QResizeEvent *event)
@@ -258,15 +276,11 @@ void PlayerWindow::resizeEvent(QResizeEvent *event)
     QMainWindow::resizeEvent(event);
     SettingsManager::instance().saveWindowGeometry("PlayerWindow", geometry());
 
-    // CRITICAL FIX: Force complete refresh to preserve fog during resize
-    // Use immediate refresh to prevent black screen
-    forceRefresh();
-
-    // Also schedule a delayed refresh to handle timing issues
-    scheduleRefresh();
-
-    // CRITICAL FIX: Always auto-fit when resized - TV display must fill screen
-    scheduleAutoFit();
+    // Auto-fit when window is resized (e.g., maximized on TV)
+    if (m_autoFitEnabled) {
+        // Delay slightly to let resize complete
+        QTimer::singleShot(100, this, &PlayerWindow::autoFitToScreen);
+    }
 }
 
 bool PlayerWindow::event(QEvent *event)
@@ -284,20 +298,17 @@ void PlayerWindow::checkForMonitorChange()
         m_currentScreen = newScreen;
 
         if (m_currentScreen && m_autoFitEnabled) {
-            // Window moved to different monitor - auto-fit the map
-            statusBar()->showMessage(QString("Moved to %1 - Auto-fitting map...").arg(m_currentScreen->name()), 3000);
-
-            // Delay slightly to allow window to settle on new screen
-            scheduleAutoFit();
+            // Window moved to different monitor - auto-fit the map (silently)
+            // CLAUDE.md COMPLIANCE: No UI feedback, pure immersion
+            QTimer::singleShot(200, this, &PlayerWindow::autoFitToScreen);
         }
     }
 }
 
 void PlayerWindow::autoFitToScreen()
 {
-    QMutexLocker locker(&SceneManager::getSceneMutex());
-
     if (m_playerView && m_playerView->scene() && !m_playerView->scene()->items().isEmpty()) {
+        // Get the first pixmap item (the map)
         QList<QGraphicsItem*> items = m_playerView->scene()->items();
         QGraphicsPixmapItem* mapItem = nullptr;
         for (QGraphicsItem* item : items) {
@@ -308,62 +319,85 @@ void PlayerWindow::autoFitToScreen()
         }
 
         if (mapItem) {
+            // Fit the entire map in view without cropping
+            // Better to have small black bars than to lose parts of the map
             m_playerView->fitInView(mapItem, Qt::KeepAspectRatio);
+
+            // Reapply rotation after fitInView (fitInView resets the transform)
+            if (m_rotation != 0) {
+                m_playerView->rotate(m_rotation);
+            }
         }
 
-        locker.unlock();
+        // CLAUDE.md COMPLIANCE: Auto-fit silently without any UI feedback
+        // Pure immersion - no status messages
+    }
+}
 
-        if (m_currentScreen) {
-            QRect screenGeometry = m_currentScreen->geometry();
-            statusBar()->showMessage(QString("Auto-fitted to %1 (%2x%3)")
-                                   .arg(m_currentScreen->name())
-                                   .arg(screenGeometry.width())
-                                   .arg(screenGeometry.height()), 5000);
+void PlayerWindow::setRotation(int rotation)
+{
+    m_rotation = rotation % 360;
+    // Rotation will be applied on next autoFitToScreen() call
+    // or immediately if we have a scene
+    if (m_playerView && m_playerView->scene()) {
+        QRectF sceneRect = m_playerView->scene()->sceneRect();
+        if (!sceneRect.isEmpty()) {
+            m_playerView->fitInView(sceneRect, Qt::KeepAspectRatio);
+            if (m_rotation != 0) {
+                m_playerView->rotate(m_rotation);
+            }
         }
     }
 }
 
 void PlayerWindow::contextMenuEvent(QContextMenuEvent *event)
 {
-    // Create context menu for quick player window controls
-    QMenu contextMenu(this);
+    QMenu menu(this);
+    menu.setStyleSheet(
+        "QMenu { background: #2D2D2D; color: #E0E0E0; border: 1px solid #3A3A3A; padding: 4px; }"
+        "QMenu::item { padding: 6px 24px; }"
+        "QMenu::item:selected { background: #4A90E2; }"
+        "QMenu::separator { height: 1px; background: #3A3A3A; margin: 4px 8px; }"
+    );
 
-    // Fit to Screen action
-    QAction* fitAction = contextMenu.addAction("🖥️ Fit to Screen");
-    fitAction->setShortcut(QKeySequence("F"));
-    connect(fitAction, &QAction::triggered, [this]() {
-        autoFitToScreen();
+    // Display management
+    QMenu* displayMenu = menu.addMenu("Send to Display");
+    displayMenu->setStyleSheet(menu.styleSheet());
+    for (QScreen* screen : QGuiApplication::screens()) {
+        QString label = screen->name() + QString(" (%1x%2)").arg(screen->size().width()).arg(screen->size().height());
+        QAction* action = displayMenu->addAction(label);
+        connect(action, &QAction::triggered, this, [this, screen]() {
+            moveToScreen(screen, true);
+        });
+    }
+
+    menu.addSeparator();
+
+    // View controls
+    QAction* fullscreenAction = menu.addAction(isFullScreen() ? "Exit Fullscreen" : "Fullscreen (F11)");
+    connect(fullscreenAction, &QAction::triggered, this, [this]() {
+        isFullScreen() ? showNormal() : showFullScreen();
     });
 
-    // Full Screen toggle
-    QAction* fullScreenAction = contextMenu.addAction("⛶ Toggle Full Screen");
-    fullScreenAction->setShortcut(QKeySequence("F11"));
-    fullScreenAction->setCheckable(true);
-    fullScreenAction->setChecked(isFullScreen());
-    connect(fullScreenAction, &QAction::triggered, [this]() {
-        if (isFullScreen()) {
-            showNormal();
-        } else {
-            showFullScreen();
-        }
-    });
+    QAction* fitAction = menu.addAction("Reset Auto-Fit");
+    connect(fitAction, &QAction::triggered, this, &PlayerWindow::resetToAutoFit);
 
-    contextMenu.addSeparator();
+    menu.addSeparator();
 
-    // Auto-Fit toggle
-    QAction* autoFitAction = contextMenu.addAction("Auto-Fit on Monitor Change");
-    autoFitAction->setCheckable(true);
-    autoFitAction->setChecked(m_autoFitEnabled);
-    connect(autoFitAction, &QAction::triggered, [this](bool checked) {
-        m_autoFitEnabled = checked;
-        if (checked) {
-            autoFitToScreen();
-        }
-        statusBar()->showMessage(QString("Auto-fit %1").arg(checked ? "enabled" : "disabled"), 3000);
-    });
+    // Privacy modes
+    QAction* blackoutAction = menu.addAction("Blackout");
+    connect(blackoutAction, &QAction::triggered, this, &PlayerWindow::activateBlackout);
 
-    // Execute menu at cursor position
-    contextMenu.exec(event->globalPos());
+    QAction* intermissionAction = menu.addAction("Intermission");
+    connect(intermissionAction, &QAction::triggered, this, &PlayerWindow::activateIntermission);
+
+    if (m_privacyModeActive) {
+        menu.addSeparator();
+        QAction* exitPrivacyAction = menu.addAction("Exit Privacy Mode (Esc)");
+        connect(exitPrivacyAction, &QAction::triggered, this, &PlayerWindow::deactivatePrivacyMode);
+    }
+
+    menu.exec(event->globalPos());
 }
 
 void PlayerWindow::keyPressEvent(QKeyEvent *event)
@@ -376,7 +410,7 @@ void PlayerWindow::keyPressEvent(QKeyEvent *event)
         }
         if (isFullScreen()) {
             showNormal();
-            statusBar()->showMessage("Exited fullscreen mode", 2000);
+            // CLAUDE.md COMPLIANCE: No status messages for pure immersion
             return;
         }
     }
@@ -385,10 +419,10 @@ void PlayerWindow::keyPressEvent(QKeyEvent *event)
     if (event->key() == Qt::Key_F11) {
         if (isFullScreen()) {
             showNormal();
-            statusBar()->showMessage("Exited fullscreen mode", 2000);
+            // CLAUDE.md COMPLIANCE: No status messages for pure immersion
         } else {
             showFullScreen();
-            statusBar()->showMessage("Entered fullscreen mode", 2000);
+            // CLAUDE.md COMPLIANCE: No status messages for pure immersion
         }
         return;
     }
@@ -422,7 +456,8 @@ void PlayerWindow::onTripleClickDetected()
 {
     // Emergency blackout activated by triple-click
     activateBlackout();
-    statusBar()->showMessage("🔒 Emergency Blackout Activated - Press Escape to exit", 5000);
+    // CLAUDE.md COMPLIANCE: No status messages for pure immersion
+    // Triple-click blackout is silent - users know Escape exits
 }
 
 void PlayerWindow::createPrivacyOverlays()
@@ -460,90 +495,6 @@ void PlayerWindow::createPrivacyOverlays()
     m_intermissionOverlay->hide();
 }
 
-void PlayerWindow::changeEvent(QEvent *event)
-{
-    // CRITICAL FIX: Handle window state changes to prevent black screen and fog loss
-    if (event->type() == QEvent::WindowStateChange) {
-        QWindowStateChangeEvent *stateEvent = static_cast<QWindowStateChangeEvent*>(event);
-
-        // Check if window was minimized and now restored
-        if ((stateEvent->oldState() & Qt::WindowMinimized) &&
-            !(windowState() & Qt::WindowMinimized)) {
-            // Window was restored from minimized state - force refresh
-            scheduleRefresh();
-        }
-        // CRITICAL FIX: Handle maximize/restore to preserve fog
-        else if ((stateEvent->oldState() & Qt::WindowMaximized) !=
-                 (windowState() & Qt::WindowMaximized)) {
-            // Window maximized or restored - force immediate refresh to preserve fog
-            // Use immediate update to prevent fog disappearing
-            forceRefresh();
-
-            // Also trigger auto-fit if enabled when maximizing
-            if ((windowState() & Qt::WindowMaximized) && m_autoFitEnabled) {
-                scheduleAutoFit();
-            }
-        }
-        // CRITICAL FIX: Handle fullscreen transitions
-        else if ((stateEvent->oldState() & Qt::WindowFullScreen) !=
-                 (windowState() & Qt::WindowFullScreen)) {
-            // Entering or exiting fullscreen - force refresh
-            scheduleRefresh();
-        }
-    }
-
-    QMainWindow::changeEvent(event);
-}
-
-void PlayerWindow::updateDisplay()
-{
-    forceRefresh();
-}
-
-void PlayerWindow::forceRefresh()
-{
-    std::cerr << "\n=== [PlayerWindow::forceRefresh] START - NEW ARCHITECTURE ===" << std::endl;
-
-    if (!m_playerView || !m_sharedDisplay) {
-        std::cerr << "[PlayerWindow::forceRefresh] ERROR: Null pointers - playerView="
-                  << (m_playerView ? "OK" : "NULL") << ", sharedDisplay="
-                  << (m_sharedDisplay ? "OK" : "NULL") << std::endl;
-        std::cerr.flush();
-        return;
-    }
-
-    QImage sourceImage = m_sharedDisplay->getCurrentMapImage();
-    if (sourceImage.isNull()) {
-        std::cerr << "[PlayerWindow::forceRefresh] WARNING: No map loaded in DM window yet" << std::endl;
-        std::cerr.flush();
-        return;
-    }
-
-    std::cerr << "[PlayerWindow::forceRefresh] Source image size: " << sourceImage.width() << "x" << sourceImage.height() << std::endl;
-    std::cerr << "[PlayerWindow::forceRefresh] Copying map to PlayerWindow..." << std::endl;
-    std::cerr.flush();
-
-    m_playerView->copyMapFrom(m_sharedDisplay);
-
-    if (m_playerView->scene()) {
-        std::cerr << "[PlayerWindow::forceRefresh] PlayerView scene items: "
-                  << m_playerView->scene()->items().count() << std::endl;
-    }
-
-    std::cerr << "[PlayerWindow::forceRefresh] Map copy complete, updating viewport..." << std::endl;
-    if (m_playerView->viewport()) {
-        m_playerView->viewport()->update();
-    }
-    m_playerView->update();
-
-    QApplication::processEvents(QEventLoop::ExcludeUserInputEvents, 1);
-
-    std::cerr << "=== [PlayerWindow::forceRefresh] END - Display updated ===" << std::endl;
-    std::cerr.flush();
-
-    statusBar()->showMessage("Display refreshed", 2000);
-}
-
 void PlayerWindow::activateBlackout()
 {
     m_privacyModeActive = true;
@@ -562,7 +513,7 @@ void PlayerWindow::deactivatePrivacyMode()
 {
     m_privacyModeActive = false;
     hidePrivacyOverlays();
-    statusBar()->showMessage("Privacy mode deactivated", 2000);
+    // CLAUDE.md COMPLIANCE: No status messages for pure immersion
     emit privacyModeChanged(false);
 }
 
@@ -607,18 +558,68 @@ void PlayerWindow::animatePrivacyTransition(QWidget* overlay, bool show)
     }
 }
 
-void PlayerWindow::scheduleRefresh()
+// ============================================================
+// Multi-Monitor Support
+// ============================================================
+
+QList<QScreen*> PlayerWindow::getAvailableScreens()
 {
-    if (m_refreshTimer->isActive()) {
-        m_refreshTimer->stop();
-    }
-    m_refreshTimer->start(REFRESH_DEBOUNCE_MS);
+    return QGuiApplication::screens();
 }
 
-void PlayerWindow::scheduleAutoFit()
+QScreen* PlayerWindow::findSecondaryScreen()
 {
-    if (m_autoFitTimer->isActive()) {
-        m_autoFitTimer->stop();
+    QScreen* primary = QGuiApplication::primaryScreen();
+    QList<QScreen*> screens = QGuiApplication::screens();
+
+    // Find any screen that is not the primary screen
+    for (QScreen* screen : screens) {
+        if (screen != primary) {
+            return screen;
+        }
     }
-    m_autoFitTimer->start(AUTOFIT_DEBOUNCE_MS);
+
+    return nullptr;  // No secondary screen found
+}
+
+void PlayerWindow::moveToScreen(QScreen* screen, bool fullscreen)
+{
+    if (!screen) return;
+
+    // Get the geometry of the target screen
+    QRect screenGeometry = screen->geometry();
+
+    // If currently fullscreen, exit first to allow proper repositioning
+    if (isFullScreen()) {
+        showNormal();
+    }
+
+    // Move window to the target screen
+    // First set geometry to position on that screen
+    setGeometry(screenGeometry);
+
+    // Update our tracked screen
+    m_currentScreen = screen;
+
+    // Go fullscreen if requested
+    if (fullscreen) {
+        // Small delay to ensure window is positioned before going fullscreen
+        QTimer::singleShot(100, this, [this]() {
+            showFullScreen();
+            // Auto-fit after going fullscreen
+            QTimer::singleShot(200, this, &PlayerWindow::autoFitToScreen);
+        });
+    } else {
+        // Just maximize on the target screen
+        showMaximized();
+        QTimer::singleShot(100, this, &PlayerWindow::autoFitToScreen);
+    }
+}
+
+void PlayerWindow::moveToSecondaryDisplay()
+{
+    QScreen* secondary = findSecondaryScreen();
+    if (secondary) {
+        moveToScreen(secondary, true);  // Move to secondary and go fullscreen
+    }
 }

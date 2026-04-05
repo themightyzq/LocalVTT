@@ -90,6 +90,10 @@ public slots:
     void setFogToolMode(FogToolMode mode);
     void updateFogToolButtonStates(FogToolMode mode);
 
+    // Beacon color
+    QColor getBeaconColor() const { return m_beaconColor; }
+    void setBeaconColor(const QColor& color);
+
 signals:
     void loadMapRequested();
     void togglePlayerWindowRequested();
@@ -109,7 +113,7 @@ signals:
     void gridSizeChanged(int size);
     void fogBrushSizeChanged(int size);
     void gmOpacityChanged(int opacity);
-
+    void beaconColorChanged(const QColor& color);
 
 protected:
     void paintEvent(QPaintEvent* event) override;
@@ -131,6 +135,7 @@ private:
     void createMapSection();
     void createGridSection();
     void createFogSection();
+    void createBeaconSection();
     // History section removed - Undo/Redo moved to Edit menu only
     void createViewSection();
     void applyDarkGlassTheme();
@@ -152,6 +157,7 @@ private:
     ToolSection* m_mapSection;
     ToolSection* m_gridSection;
     ToolSection* m_fogSection;
+    ToolSection* m_beaconSection;
     // History section removed - using Edit menu for Undo/Redo
     ToolSection* m_viewSection;
 
@@ -189,6 +195,11 @@ private:
     FogToolMode m_fogToolMode;
     bool m_expanded;
     bool m_hovered;
+
+    // Beacon color
+    QColor m_beaconColor;
+    QButtonGroup* m_beaconColorGroup;
+    QList<QToolButton*> m_beaconColorButtons;
 
     QPropertyAnimation* m_widthAnimation;
     QPropertyAnimation* m_hoverAnimation;

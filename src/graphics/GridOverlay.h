@@ -3,6 +3,8 @@
 
 #include <QGraphicsItem>
 #include <QSize>
+#include <QPen>
+#include <QPixmap>
 
 class GridOverlay : public QGraphicsItem
 {
@@ -32,12 +34,17 @@ public:
     void paint(QPainter *painter, const QStyleOptionGraphicsItem *option, QWidget *widget) override;
 
 private:
-    void paintSquareGrid(QPainter* painter);
+    void rebuildPen();    // Update cached pen when color changes
+    void rebuildCache();  // Rebuild pixmap cache when grid parameters change (replaces paintSquareGrid)
 
     QSize m_mapSize;
     int m_gridSize;
     QColor m_gridColor;
     qreal m_gridOpacity;
+    QPen m_gridPen;  // Cached pen for paint() optimization
+
+    QPixmap m_cachedGrid;  // Pre-rendered grid pixmap
+    bool m_cacheValid = false;  // Whether the cached pixmap is up to date
 
     // D&D measurement properties
     double m_feetPerSquare;     // Game distance per square (default: 5 feet)

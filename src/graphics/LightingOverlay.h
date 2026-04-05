@@ -53,6 +53,13 @@ public:
     void setExposure(qreal exposure) { m_exposure = qBound(0.1, exposure, 3.0); invalidateCache(); }
     qreal getExposure() const { return m_exposure; }
 
+    // DM-only brightness/contrast controls (not applied to Player view)
+    void setBrightness(qreal brightness) { m_brightness = qBound(-1.0, brightness, 1.0); invalidateCache(); update(); }
+    qreal getBrightness() const { return m_brightness; }
+
+    void setContrast(qreal contrast) { m_contrast = qBound(-1.0, contrast, 1.0); invalidateCache(); update(); }
+    qreal getContrast() const { return m_contrast; }
+
     // QGraphicsItem interface
     QRectF boundingRect() const override;
     void paint(QPainter* painter, const QStyleOptionGraphicsItem* option, QWidget* widget) override;
@@ -61,6 +68,7 @@ private:
     void updateBounds();
     void applyTimeOfDaySettings();
     void renderAmbientOverlay(QPainter* painter);
+    void renderBrightnessContrast(QPainter* painter);  // DM-only brightness/contrast
     void invalidateCache();
     QColor calculateOptimizedOverlayColor(qreal finalIntensity) const;
 
@@ -92,6 +100,10 @@ private:
     // HDR lighting
     bool m_useHDRLighting;
     qreal m_exposure;  // HDR exposure control (0.1 to 3.0)
+
+    // DM-only brightness/contrast
+    qreal m_brightness;  // -1.0 to 1.0 (0.0 = neutral)
+    qreal m_contrast;    // -1.0 to 1.0 (0.0 = neutral)
 };
 
 #endif // LIGHTINGOVERLAY_H

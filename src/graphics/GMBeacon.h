@@ -26,6 +26,14 @@ public:
     qreal animationProgress() const { return m_animationProgress; }
     void setAnimationProgress(qreal progress);
 
+    // Color control
+    void setColor(const QColor& color);
+    QColor color() const { return m_beaconColor; }
+
+    // Preset colors for easy selection
+    static QList<QColor> presetColors();
+    static QString colorName(const QColor& color);
+
 signals:
     void animationFinished();
 
@@ -38,8 +46,8 @@ private:
     qreal m_maxRadius;
     static constexpr int RING_COUNT = 3;
     static constexpr int ANIMATION_DURATION = 2000; // 2 seconds
-    static constexpr qreal BASE_OPACITY = 0.9;
-    static constexpr qreal DEFAULT_RADIUS_PERCENT = 0.20; // 20% of viewport width
+    static constexpr qreal BASE_OPACITY = 1.0;  // Start fully opaque
+    static constexpr qreal DEFAULT_RADIUS_PERCENT = 0.20; // 20% of map dimension
 
     QColor m_beaconColor;
 };

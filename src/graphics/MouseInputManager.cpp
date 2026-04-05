@@ -1,8 +1,7 @@
 #include "MouseInputManager.h"
 #include "MapDisplay.h"
 #include "FogOfWar.h"
-#include "PortalSystem.h"
-#include "SceneManager.h"
+#include "ZLayers.h"
 #include "LightingOverlay.h"
 #include "GridOverlay.h"
 #include "utils/FogToolMode.h"
@@ -136,86 +135,48 @@ void MouseInputManager::handleMouseDoubleClick(QMouseEvent* event)
 {
 
     if (event->button() == Qt::LeftButton && m_mapDisplay->getLightingOverlay()) {
-        QPointF scenePos = m_mapDisplay->mapToScene(event->pos());
         // Point light feature removed - skip double-click light handling
     }
 }
 
 void MouseInputManager::handleKeyPress(QKeyEvent* event)
 {
-    bool handled = false;
+    switch(event->key()) {
+        case Qt::Key_Plus:
+        case Qt::Key_Equal:
+            m_mapDisplay->zoomToPreset(m_mapDisplay->getZoomLevel() * 1.2);
+            break;
 
-    {
-        handled = true;
+        case Qt::Key_Minus:
+        case Qt::Key_Underscore:
+            m_mapDisplay->zoomToPreset(m_mapDisplay->getZoomLevel() / 1.2);
+            break;
 
-        switch(event->key()) {
-            case Qt::Key_Plus:
-            case Qt::Key_Equal:
-                m_mapDisplay->zoomToPreset(m_mapDisplay->getZoomLevel() * 1.2);
-                break;
+        // Key_0 removed - use '/' for fit-to-screen (CLAUDE.md 3.6)
 
-            case Qt::Key_Minus:
-            case Qt::Key_Underscore:
-                m_mapDisplay->zoomToPreset(m_mapDisplay->getZoomLevel() / 1.2);
-                break;
+        case Qt::Key_1:
+            if (event->modifiers() & Qt::ControlModifier) {
+                m_mapDisplay->zoomToPreset(1.0);
+            }
+            break;
 
-            case Qt::Key_0:
-                m_mapDisplay->fitMapToView();
-                break;
+        case Qt::Key_2:
+            if (event->modifiers() & Qt::ControlModifier) {
+                m_mapDisplay->zoomToPreset(2.0);
+            }
+            break;
 
-            case Qt::Key_1:
-                if (event->modifiers() & Qt::ControlModifier) {
-                    m_mapDisplay->zoomToPreset(1.0);
-                } else {
-                    handled = false;
-                }
-                break;
+        case Qt::Key_3:
+            if (event->modifiers() & Qt::ControlModifier) {
+                m_mapDisplay->zoomToPreset(3.0);
+            }
+            break;
 
-            case Qt::Key_2:
-                if (event->modifiers() & Qt::ControlModifier) {
-                    m_mapDisplay->zoomToPreset(2.0);
-                } else {
-                    handled = false;
-                }
-                break;
+        // Key_4, Key_5, Key_6 removed - obscure zoom presets (CLAUDE.md UI consistency)
 
-            case Qt::Key_3:
-                if (event->modifiers() & Qt::ControlModifier) {
-                    m_mapDisplay->zoomToPreset(3.0);
-                } else {
-                    handled = false;
-                }
-                break;
-
-            case Qt::Key_4:
-                if (event->modifiers() & Qt::ControlModifier) {
-                    m_mapDisplay->zoomToPreset(0.5);
-                } else {
-                    handled = false;
-                }
-                break;
-
-            case Qt::Key_5:
-                m_mapDisplay->zoomToPreset(0.25);
-                break;
-
-            case Qt::Key_6:
-                m_mapDisplay->zoomToPreset(1.5);
-                break;
-
-            case Qt::Key_P:
-                if (m_mapDisplay->arePortalsEnabled() && m_mapDisplay->getPortalSystem()) {
-                    QPointF scenePos = m_mapDisplay->mapToScene(m_mapDisplay->mapFromGlobal(QCursor::pos()));
-                    emit portalToggleRequested(scenePos);
-                }
-                break;
-
-            default:
-                handled = false;
-                break;
-        }
+        default:
+            break;
     }
-
 }
 
 void MouseInputManager::setFogRectangleModeEnabled(bool enabled)
@@ -225,7 +186,7 @@ void MouseInputManager::setFogRectangleModeEnabled(bool enabled)
     if (!enabled && m_isSelectingRectangle) {
         m_isSelectingRectangle = false;
         if (m_selectionRectIndicator) {
-            QMutexLocker locker(&SceneManager::getSceneMutex());
+
             m_mapDisplay->getScene()->removeItem(m_selectionRectIndicator);
             delete m_selectionRectIndicator;
             m_selectionRectIndicator = nullptr;
@@ -275,33 +236,40 @@ void MouseInputManager::handleFogToolMousePress(QMouseEvent* event)
 {
     if (!m_mapDisplay->getFogOverlay()) return;
 
+    // Save undo state once for the entire stroke
+    m_mapDisplay->getFogOverlay()->beginStroke();
+
     // Rectangle mode controlled by button state only (no Shift key)
     if (m_fogRectangleModeEnabled && event->button() == Qt::LeftButton) {
         m_isSelectingRectangle = true;
         m_rectangleStartPos = m_mapDisplay->mapToScene(event->pos());
         m_currentSelectionRect = QRectF(m_rectangleStartPos, QSizeF(1, 1));
-        m_rectangleHideMode = false;  // Always reveal (no hide mode)
+        m_rectangleHideMode = m_fogHideModeEnabled;
 
         if (!m_selectionRectIndicator) {
             m_selectionRectIndicator = new QGraphicsRectItem();
-            m_selectionRectIndicator->setZValue(100);
-
-            QMutexLocker locker(&SceneManager::getSceneMutex());
+            m_selectionRectIndicator->setZValue(ZLayer::ToolPreview);
             m_mapDisplay->getScene()->addItem(m_selectionRectIndicator);
         }
 
-        // Visual feedback for rectangle mode - green for reveal
-        QColor rectColor = QColor(100, 255, 100, 150);
-        QPen rectPen = QPen(QColor(80, 255, 80), 2, Qt::DashLine);
+        // Visual feedback: green for reveal, red for hide
+        QColor rectColor = m_fogHideModeEnabled
+            ? QColor(255, 100, 100, 150) : QColor(100, 255, 100, 150);
+        QPen rectPen = m_fogHideModeEnabled
+            ? QPen(QColor(255, 80, 80), 2, Qt::DashLine) : QPen(QColor(80, 255, 80), 2, Qt::DashLine);
 
         m_selectionRectIndicator->setPen(rectPen);
         m_selectionRectIndicator->setBrush(QBrush(rectColor));
         m_selectionRectIndicator->setRect(m_currentSelectionRect);
     } else if (event->button() == Qt::LeftButton) {
-        // Brush mode - always reveal (no hide mode)
+        // Brush mode
         QPointF scenePos = m_mapDisplay->mapToScene(event->pos());
         FogOfWar* fog = m_mapDisplay->getFogOverlay();
-        fog->revealArea(scenePos, m_fogBrushSize);
+        if (m_fogHideModeEnabled) {
+            fog->hideArea(scenePos, m_fogBrushSize);
+        } else {
+            fog->revealArea(scenePos, m_fogBrushSize);
+        }
         m_mapDisplay->update();
         m_mapDisplay->notifyFogChanged();
     }
@@ -315,9 +283,11 @@ void MouseInputManager::handleFogToolMouseMove(QMouseEvent* event)
     if (event->buttons() & Qt::LeftButton && !m_fogRectangleModeEnabled && !m_isSelectingRectangle) {
         QPointF scenePos = m_mapDisplay->mapToScene(event->pos());
         FogOfWar* fog = m_mapDisplay->getFogOverlay();
-
-        // Always reveal (no hide mode)
-        fog->revealArea(scenePos, m_fogBrushSize);
+        if (m_fogHideModeEnabled) {
+            fog->hideArea(scenePos, m_fogBrushSize);
+        } else {
+            fog->revealArea(scenePos, m_fogBrushSize);
+        }
         m_mapDisplay->update();
         m_mapDisplay->notifyFogChanged();
     }
@@ -330,20 +300,28 @@ void MouseInputManager::handleFogToolMouseRelease(QMouseEvent* event)
 
         if (!m_currentSelectionRect.isEmpty()) {
             FogOfWar* fog = m_mapDisplay->getFogOverlay();
-            // Always reveal (no hide mode)
-            fog->revealRectangle(m_currentSelectionRect);
+            if (m_rectangleHideMode) {
+                fog->hideRectangle(m_currentSelectionRect);
+            } else {
+                fog->revealRectangle(m_currentSelectionRect);
+            }
             m_mapDisplay->update();
             m_mapDisplay->notifyFogChanged();
         }
 
         if (m_selectionRectIndicator) {
-            QMutexLocker locker(&SceneManager::getSceneMutex());
+
             m_mapDisplay->getScene()->removeItem(m_selectionRectIndicator);
             delete m_selectionRectIndicator;
             m_selectionRectIndicator = nullptr;
         }
 
         m_mapDisplay->update();
+    }
+
+    // End the stroke (undo state was saved in mousePress)
+    if (m_mapDisplay->getFogOverlay()) {
+        m_mapDisplay->getFogOverlay()->endStroke();
     }
 }
 

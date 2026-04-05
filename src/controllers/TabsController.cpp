@@ -1,35 +1,36 @@
 #include "TabsController.h"
 #include "graphics/MapDisplay.h"
-#include "graphics/SceneManager.h"
 #include "utils/MapSession.h"
 #include "utils/ErrorHandler.h"
 #include "utils/DebugConsole.h"
+#include "ui/widgets/ThumbnailCache.h"
 
-#include <QTabWidget>
+#include <QTabBar>
 #include <QFileInfo>
+#include <QBuffer>
+#include <QByteArray>
 #include <QApplication>
 #include <QThread>
 #include <QTimer>
 #include <QPointer>
-#include <QMutexLocker>
 
 TabsController::TabsController(QObject* parent)
     : QObject(parent) {}
 
-void TabsController::attach(QTabWidget* tabs, MapDisplay* display, int maxTabs)
+void TabsController::attach(QTabBar* tabBar, MapDisplay* display, int maxTabs)
 {
-    m_tabs = tabs;
+    m_tabBar = tabBar;
     m_display = display;
     m_maxTabs = maxTabs;
-    if (m_tabs) {
-        connect(m_tabs, &QTabWidget::currentChanged, this, &TabsController::onTabChanged);
-        connect(m_tabs, &QTabWidget::tabCloseRequested, this, &TabsController::onTabCloseRequested);
+    if (m_tabBar) {
+        connect(m_tabBar, &QTabBar::currentChanged, this, &TabsController::onTabChanged);
+        connect(m_tabBar, &QTabBar::tabCloseRequested, this, &TabsController::onTabCloseRequested);
     }
 }
 
 void TabsController::loadMapFile(const QString& path)
 {
-    if (!m_tabs || !m_display) {
+    if (!m_tabBar || !m_display) {
         ErrorHandler::instance().reportError(
             "Cannot load map: UI components not initialized",
             ErrorLevel::Error
@@ -60,7 +61,7 @@ void TabsController::loadMapFile(const QString& path)
     // If already open, switch
     for (int i = 0; i < m_sessions.size(); ++i) {
         if (m_sessions[i]->filePath() == path) {
-            m_tabs->setCurrentIndex(i);
+            m_tabBar->setCurrentIndex(i);
             return;
         }
     }
@@ -88,14 +89,14 @@ void TabsController::createNewTab(const QString& filePath)
     // Defer heavy load slightly to keep UI responsive (mirrors existing behavior)
     // CRITICAL FIX: Capture weak pointer to prevent crash if window closes during load
     QPointer<TabsController> weakThis(this);
-    QTimer::singleShot(10, this, [weakThis, filePath, fi, fileSize]() {
+    QTimer::singleShot(10, this, [weakThis, filePath, fi]() {
         // Check if controller still exists (window not closed)
         if (!weakThis) {
             return;  // Window was closed, abort
         }
 
         // Additional safety check for member variables
-        if (!weakThis->m_tabs || !weakThis->m_display) {
+        if (!weakThis->m_tabBar || !weakThis->m_display) {
             return;  // UI components destroyed, abort
         }
 
@@ -105,7 +106,7 @@ void TabsController::createNewTab(const QString& filePath)
             const bool ok = session->loadImage();
 
             // Check again after potentially long load operation
-            if (!weakThis || !weakThis->m_tabs || !weakThis->m_display) {
+            if (!weakThis || !weakThis->m_tabBar || !weakThis->m_display) {
                 delete session;
                 return;  // Window closed during load
             }
@@ -128,35 +129,44 @@ void TabsController::createNewTab(const QString& filePath)
                 emit weakThis->requestStatus(errorMsg, 5000);
             }
             return;
-        } catch (...) {
-            if (session) delete session;
-            if (weakThis) {
-                emit weakThis->requestHideProgress();
-                QString errorMsg = "Unknown error occurred while loading map";
-                ErrorHandler::instance().reportError(errorMsg, ErrorLevel::Critical);
-                emit weakThis->requestStatus(errorMsg, 5000);
+        }
+
+        // Deactivate current session before adding new one
+        if (weakThis->m_currentIndex >= 0 && weakThis->m_currentIndex < weakThis->m_sessions.size()) {
+            MapSession* currentSession = weakThis->m_sessions[weakThis->m_currentIndex];
+            if (currentSession) {
+                currentSession->setZoomLevel(weakThis->m_display->getZoomLevel());
+                currentSession->setViewCenter(weakThis->m_display->mapToScene(weakThis->m_display->rect().center()));
+                currentSession->deactivateSession(weakThis->m_display);
             }
-            return;
         }
 
         weakThis->m_sessions.append(session);
-        
-        // CRITICAL FIX: Activate the session BEFORE adding the tab
-        // This ensures the map is actually loaded when the tab is displayed
-        // For the first tab, we need to activate it manually since there's no previous tab
-        if (weakThis->m_sessions.size() == 1) {
-            DebugConsole::info("First tab - activating session immediately", "Tabs");
-            weakThis->m_currentIndex = 0;
-            session->activateSession(weakThis->m_display);
-        } else {
-            DebugConsole::info(QString("Not first tab (have %1 tabs)").arg(weakThis->m_sessions.size()), "Tabs");
-        }
-        
-        // Use the shared display as the tab widget content
-        const int tabIndex = weakThis->m_tabs->addTab(weakThis->m_display, weakThis->shortTitle(filePath));
-        weakThis->m_tabs->show();
+        const int newIndex = weakThis->m_sessions.size() - 1;
+
+        // CRITICAL FIX: Always activate the session explicitly
+        // We can't rely on setCurrentIndex triggering currentChanged because:
+        // 1. When we add the same widget (m_display) to a new tab, Qt may auto-select it
+        // 2. If Qt already made the new tab current, setCurrentIndex won't emit currentChanged
+        DebugConsole::info(QString("Activating session for tab %1").arg(newIndex), "Tabs");
+        weakThis->m_currentIndex = newIndex;
+        session->activateSession(weakThis->m_display);
+
+        // Add tab to the tab bar (just adds a label, MapDisplay is managed separately)
+        const int tabIndex = weakThis->m_tabBar->addTab(weakThis->shortTitle(filePath));
+        weakThis->m_tabBar->show();
         weakThis->m_display->show();
-        weakThis->m_tabs->setCurrentIndex(tabIndex);
+
+        // Set tab tooltip with thumbnail preview
+        weakThis->setTabTooltipWithThumbnail(tabIndex, filePath);
+
+        // Set current index (may not trigger signal if already current, but that's fine now)
+        weakThis->m_tabBar->setCurrentIndex(tabIndex);
+
+        // Emit signals to update UI (currentMapPathChanged, uiChanged, sceneChanged)
+        emit weakThis->currentMapPathChanged(filePath);
+        emit weakThis->uiChanged();
+        emit weakThis->sceneChanged();
 
         emit weakThis->requestAddRecent(filePath);
         emit weakThis->requestStatus(QStringLiteral("Loaded: %1").arg(fi.fileName()), 5000);
@@ -175,7 +185,7 @@ void TabsController::onTabCloseRequested(int index)
 
 void TabsController::switchToTab(int index)
 {
-    if (!m_display || !m_tabs) {
+    if (!m_display || !m_tabBar) {
         ErrorHandler::instance().reportError(
             "Cannot switch tabs: UI components not initialized",
             ErrorLevel::Warning
@@ -227,30 +237,24 @@ void TabsController::switchToTab(int index)
             QString("Error switching tabs: %1").arg(e.what()),
             ErrorLevel::Error
         );
-    } catch (...) {
-        ErrorHandler::instance().reportError(
-            "Unknown error while switching tabs",
-            ErrorLevel::Critical
-        );
     }
 }
 
 void TabsController::closeTab(int index)
 {
-    if (!m_tabs || !m_display) return;
+    if (!m_tabBar || !m_display) return;
     if (index < 0 || index >= m_sessions.size()) return;
 
     MapSession* session = m_sessions[index];
     session->deactivateSession(m_display);
     m_sessions.removeAt(index);
-    m_tabs->removeTab(index);
+    m_tabBar->removeTab(index);
     delete session;
 
     if (m_sessions.isEmpty()) {
-        m_tabs->hide();
+        m_tabBar->hide();
         m_currentIndex = -1;
         emit currentMapPathChanged(QString());
-        QMutexLocker locker(&SceneManager::getSceneMutex());
         if (m_display->scene()) {
             m_display->scene()->clear();
         }
@@ -259,7 +263,7 @@ void TabsController::closeTab(int index)
             m_currentIndex--;
         }
         const int newIndex = qMin(index, m_sessions.size() - 1);
-        m_tabs->setCurrentIndex(newIndex);
+        m_tabBar->setCurrentIndex(newIndex);
     }
 }
 
@@ -269,6 +273,46 @@ QString TabsController::shortTitle(const QString& filePath) const
     QString base = info.baseName();
     if (base.size() > 20) return base.left(17) + QStringLiteral("...");
     return base;
+}
+
+void TabsController::setTabTooltipWithThumbnail(int tabIndex, const QString& filePath)
+{
+    if (!m_tabBar || tabIndex < 0) return;
+
+    QFileInfo info(filePath);
+
+    // Try to get thumbnail from cache
+    QPixmap thumbnail = ThumbnailCache::instance().getThumbnail(filePath);
+
+    QString tooltipHtml;
+    if (!thumbnail.isNull()) {
+        // Scale thumbnail to a reasonable tooltip size (150px max)
+        QPixmap scaled = thumbnail.scaled(150, 150, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+
+        // Convert pixmap to base64 for embedding in HTML tooltip
+        QByteArray imageData;
+        QBuffer buffer(&imageData);
+        buffer.open(QIODevice::WriteOnly);
+        scaled.save(&buffer, "PNG");
+
+        QString base64Image = QString::fromLatin1(imageData.toBase64());
+
+        tooltipHtml = QString(
+            "<div style='text-align: center;'>"
+            "<img src='data:image/png;base64,%1' style='max-width: 150px;'/><br/>"
+            "<b>%2</b><br/>"
+            "<span style='color: #888;'>%3</span>"
+            "</div>"
+        ).arg(base64Image, info.fileName(), info.absolutePath());
+    } else {
+        // No thumbnail available yet, just show text
+        tooltipHtml = QString(
+            "<b>%1</b><br/>"
+            "<span style='color: #888;'>%2</span>"
+        ).arg(info.fileName(), info.absolutePath());
+    }
+
+    m_tabBar->setTabToolTip(tabIndex, tooltipHtml);
 }
 
 MapSession* TabsController::getCurrentSession() const

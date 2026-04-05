@@ -20,11 +20,28 @@ public:
     explicit PlayerWindow(MapDisplay* sharedDisplay, QWidget *parent = nullptr);
     ~PlayerWindow();
 
+    void updateDisplay();
+    void forceRefresh();  // Force immediate scene refresh
     void setEnhancedStyling();
     void syncZoom(qreal zoomLevel, const QPointF& centerPoint = QPointF());
     void fitToView();
     void updateToolCursor();
+
+    // DM-initiated view sync - pushes DM's current view to player window
+    void syncViewFromDM(qreal zoomLevel, const QPointF& centerPoint);
+    void resetToAutoFit();  // Return to auto-fit mode
+    bool isAutoFitEnabled() const { return m_autoFitEnabled; }
     MapDisplay* getMapDisplay() const { return m_playerView; }
+
+    // Rotation control (preserved across fitInView calls)
+    void setRotation(int rotation);
+    int getRotation() const { return m_rotation; }
+
+    // Multi-monitor support
+    void moveToScreen(QScreen* screen, bool fullscreen = true);
+    void moveToSecondaryDisplay();  // Auto-detect and move to secondary
+    static QScreen* findSecondaryScreen();  // Find first non-primary screen
+    static QList<QScreen*> getAvailableScreens();
 
     // Privacy Shield features
     void activateBlackout();
@@ -32,13 +49,10 @@ public:
     void deactivatePrivacyMode();
     bool isPrivacyModeActive() const { return m_privacyModeActive; }
 
-    void forceRefresh();
-    void updateDisplay();
-
 protected:
     void showEvent(QShowEvent *event) override;
     void closeEvent(QCloseEvent *event) override;
-    void contextMenuEvent(QContextMenuEvent *event) override;
+    void contextMenuEvent(QContextMenuEvent *event) override;  // DM context menu (display, privacy, view)
 
     // Geometry persistence
     void moveEvent(QMoveEvent *event) override;
@@ -52,9 +66,6 @@ protected:
 
     // Mouse handling for triple-click detection
     void mousePressEvent(QMouseEvent *event) override;
-
-    // CRITICAL FIX: Handle window state changes to prevent black screen
-    void changeEvent(QEvent *event) override;
 
 private:
     void animateWindowTransition(bool showing);
@@ -76,6 +87,7 @@ private:
     QPropertyAnimation* m_windowAnimation;
     QScreen* m_currentScreen;
     bool m_autoFitEnabled;
+    int m_rotation;  // Current rotation (0, 90, 180, 270) - preserved across fitInView
 
     // Privacy Shield components
     QWidget* m_blackoutOverlay;
@@ -87,15 +99,6 @@ private:
     QTimer* m_tripleClickTimer;
     int m_clickCount;
     static constexpr int TRIPLE_CLICK_TIMEOUT = 500; // ms
-
-    // Consolidated refresh timer (Priority 5 fix)
-    QTimer* m_refreshTimer;
-    QTimer* m_autoFitTimer;
-    static constexpr int REFRESH_DEBOUNCE_MS = 100;
-    static constexpr int AUTOFIT_DEBOUNCE_MS = 200;
-
-    void scheduleRefresh();
-    void scheduleAutoFit();
 };
 
 #endif // PLAYERWINDOW_H

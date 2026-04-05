@@ -17,17 +17,19 @@ class QToolBar;
 class QProgressDialog;
 class QWidgetAction;
 class LoadingOverlay;
+class KeyboardShortcutsOverlay;
 class QPropertyAnimation;
 class QAction;
 class QLabel;
 class QWidget;
 class QTimer;
-class QTabWidget;
+class QTabBar;
 class QSlider;
 class QSpinBox;
 class QButtonGroup;
 class RecentFilesController;
 class FogAutosaveController;
+class QScreen;
 class TabsController;
 class FogToolsController;
 class DebugConsoleWidget;
@@ -39,6 +41,9 @@ class LightingController;
 class ViewZoomController;
 class PlayerWindowController;
 class ToolStatusWidget;
+class AtmosphereController;
+class AtmosphereToolboxWidget;
+class MapBrowserWidget;
 
 class MainWindow : public QMainWindow
 {
@@ -76,6 +81,14 @@ public slots:
     void fitMapToView() { fitToScreen(); }  // Alias for toolbar button
     void zoomIn();
     void zoomOut();
+    void centerOnMap();  // Re-center view on map without changing zoom
+    void toggleFogLock();   // Toggle fog editing lock
+    void toggleGridLock();  // Toggle grid editing lock
+    void rotateMap();       // Rotate map 90° clockwise
+    void rotatePlayerView();  // Rotate only the player view 90° clockwise
+    void toggleRotationSync();  // Toggle rotation sync to player window
+    void syncRotationToPlayer();  // Manually sync DM rotation to player
+    bool isRotationSyncEnabled() const { return m_syncRotationToPlayer; }
 
     // Measurement tool controls
 
@@ -84,12 +97,16 @@ public slots:
     FogToolMode getFogToolMode() const { return m_fogToolMode; }
 
 
-    // Legacy compatibility (will be removed)
+    // Fog mode toggle methods (used with modifier keys: Alt=hide, Shift=rectangle)
     void toggleFogHideMode();
     void toggleFogRectangleMode();
 
     // Player view mode controls
     void togglePlayerViewMode();
+
+    // Player View sync controls
+    void syncViewToPlayers();   // Push DM's current view to player window
+    void resetPlayerAutoFit();  // Reset player window to auto-fit mode
 
     // Undo/Redo controls
     void undoFogChange();
@@ -113,6 +130,12 @@ public slots:
     // Debug Console controls
     void toggleDebugConsole();
 
+    // Map Browser controls
+    void toggleMapBrowser();
+
+    // Atmosphere Toolbox controls
+    void toggleAtmosphereToolbox();
+
     // Help menu controls
     void showKeyboardShortcuts();
     void showQuickStartGuide();
@@ -123,6 +146,9 @@ public slots:
     void onTabCloseRequested(int index);
 
 protected:
+    // Window close event - ensures PlayerWindow closes with MainWindow
+    void closeEvent(QCloseEvent *event) override;
+
     // Enhanced drag and drop support
     void dragEnterEvent(QDragEnterEvent *event) override;
     void dragMoveEvent(QDragMoveEvent *event) override;
@@ -135,6 +161,9 @@ protected:
     // Geometry persistence
     void moveEvent(QMoveEvent *event) override;
     void resizeEvent(QResizeEvent *event) override;
+
+    // Focus management - ensure window has focus when shown
+    void showEvent(QShowEvent *event) override;
 
 private slots:
     void handleLoadProgress(qint64 bytesRead, qint64 totalBytes);
@@ -171,6 +200,8 @@ private:
     void autoOpenPlayerWindow();
     void positionPlayerWindow();
     void ensurePlayerWindowConnections();
+    void updateSendToDisplayMenu();  // Multi-monitor support
+    void sendPlayerWindowToScreen(QScreen* screen);
     void showLoadProgress(const QString& fileName, qint64 fileSize);
     void hideLoadProgress();
     void setupStatusBar();
@@ -199,9 +230,10 @@ private:
     LightingController* m_lightingController;
     ViewZoomController* m_viewZoomController;
     PlayerWindowController* m_playerWindowController;
+    AtmosphereController* m_atmosphereController;
 
     // Tab system
-    QTabWidget* m_tabWidget;
+    QTabBar* m_tabBar;
     static const int MAX_TABS = 10;
 
     QMenu* m_fileMenu;
@@ -209,6 +241,7 @@ private:
     QMenu* m_viewMenu;
     QMenu* m_windowMenu;
     QMenu* m_helpMenu;
+    QMenu* m_sendToDisplayMenu;  // Multi-monitor support
     QToolBar* m_mainToolBar;
     QToolBar* m_zoomToolBar;
 
@@ -228,16 +261,16 @@ private:
     QWidget* m_dropOverlay;
     QPropertyAnimation* m_dropAnimation;
 
-    bool m_gridEnabled;
-    bool m_fogEnabled;
+    bool m_fogLocked;   // When true, fog tools are disabled
+    bool m_gridLocked;  // When true, grid controls are disabled
+    int m_mapRotation;  // Current map rotation (0, 90, 180, 270)
+    int m_playerRotation;  // Player window rotation (independent when sync disabled)
+    bool m_syncRotationToPlayer;  // When true, rotation syncs to player window
     bool m_isDragging;
     bool m_updatingZoomSpinner;  // Flag to prevent feedback loops
     // Unified fog tool state
     FogToolMode m_fogToolMode;
 
-    // Legacy state variables (for compatibility)
-    bool m_fogHideModeEnabled;
-    bool m_fogRectangleModeEnabled;
     bool m_playerViewModeEnabled;
     static const int AUTOSAVE_DELAY_MS = 500;
 
@@ -249,6 +282,7 @@ private:
     QLabel* m_zoomStatusLabel;
     QLabel* m_privacyStatusLabel;
     QLabel* m_playerSyncBadge;
+    QLabel* m_rotationStatusLabel;  // Shows DM/Player rotation state
     ToolStatusWidget* m_toolStatusWidget;
 
     // Zoom controls
@@ -260,11 +294,13 @@ private:
     // Grid controls
     QSpinBox* m_gridSizeSpinner;
     QLabel* m_gridSizeLabel;
+    QAction* m_lockGridAction;  // Toggle grid lock
 
     // Zoom controls
     QSpinBox* m_zoomSpinner;
 
     // Fog brush controls
+    QAction* m_lockFogAction;   // Toggle fog lock
     QSlider* m_fogBrushSlider;
     QLabel* m_fogBrushLabel;
 
@@ -272,17 +308,6 @@ private:
     QSlider* m_gmOpacitySlider;
     QLabel* m_gmOpacityLabel;
 
-    // Fog tool mode controls
-    QButtonGroup* m_fogToolButtonGroup;
-    QAction* m_revealCircleAction;
-    QAction* m_hideCircleAction;
-    QAction* m_revealRectangleAction;
-    QAction* m_hideRectangleAction;
-    QAction* m_revealFeatheredAction;
-    QAction* m_hideFeatheredAction;
-    QAction* m_drawPenAction;
-    QAction* m_drawEraserAction;
-    QLabel* m_fogToolModeLabel;
     // Fog tools controller
     FogToolsController* m_fogToolsController;
 
@@ -296,7 +321,17 @@ private:
     // Player Window toggle action
     QAction* m_playerWindowToggleAction;
 
+    // Player View sync actions
+    QAction* m_syncViewToPlayersAction;
+    QAction* m_resetPlayerAutoFitAction;
+
+    // Rotation sync actions
+    QAction* m_syncRotationToggleAction;  // Toggle auto-sync rotation
+    QAction* m_syncRotationNowAction;     // Manual sync rotation to player
+    QAction* m_rotatePlayerViewAction;    // Rotate only player view
+
     // Fog tool actions for state management
+    QAction* m_fogHideToggleAction;
     QAction* m_fogBrushAction;
     QAction* m_fogRectAction;
     QAction* m_fogRectangleModeAction;
@@ -338,11 +373,20 @@ private:
     DebugConsoleWidget* m_debugConsoleWidget;
     QAction* m_debugConsoleAction;
 
-    // Tab management
-    bool hasMaxTabs() const { return false; }
+    // Keyboard shortcuts overlay
+    KeyboardShortcutsOverlay* m_shortcutsOverlay;
+
+    // Map Browser
+    MapBrowserWidget* m_mapBrowserWidget;
+    QAction* m_mapBrowserAction;
+
+    // Atmosphere Toolbox
+    AtmosphereToolboxWidget* m_atmosphereToolbox;
+    QAction* m_atmosphereToolboxAction;
 
     // Fog tool mode helpers
     void setupFogToolModeSystem();
+    void updateFogModeIndicator();
     void updateFogToolModeUI();
     void updateFogToolModeStatus();
     QString getFogToolModeText(FogToolMode mode) const;

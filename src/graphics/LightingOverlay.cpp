@@ -1,4 +1,5 @@
 #include "graphics/LightingOverlay.h"
+#include "graphics/ZLayers.h"
 #include <QPainter>
 #include <QGraphicsScene>
 #include <QGraphicsView>
@@ -16,10 +17,12 @@ LightingOverlay::LightingOverlay(QGraphicsItem* parent)
     , m_darkness(0.0)
     , m_ambientLightLevel(0.2)
     , m_cacheValid(false)
-    , m_exposure(0.2)  // Minimal exposure for subtle lighting
     , m_useHDRLighting(true)
+    , m_exposure(0.2)  // Minimal exposure for subtle lighting
+    , m_brightness(0.0)  // Neutral brightness
+    , m_contrast(0.0)    // Neutral contrast
 {
-    setZValue(600); // Above weather effects but below UI
+    setZValue(ZLayer::LightingOverlay);
     setVisible(true);  // Make visible since enabled by default
     applyTimeOfDaySettings();
 }
@@ -183,10 +186,58 @@ void LightingOverlay::renderAmbientOverlay(QPainter* painter)
     painter->drawRect(m_bounds);
 }
 
+void LightingOverlay::renderBrightnessContrast(QPainter* painter)
+{
+    // Apply brightness/contrast overlay (DM only)
+    // Brightness: -1.0 to 1.0, where < 0 darkens, > 0 brightens
+    // Contrast: -1.0 to 1.0, where < 0 reduces contrast, > 0 increases contrast
+
+    painter->save();
+
+    // Brightness effect: overlay with white (brighten) or black (darken)
+    if (m_brightness != 0.0) {
+        if (m_brightness > 0.0) {
+            // Brighten: overlay with semi-transparent white
+            // Using CompositionMode_Plus adds light
+            painter->setCompositionMode(QPainter::CompositionMode_Plus);
+            int alpha = int(m_brightness * 100);  // Max 100 alpha for subtle effect
+            painter->setBrush(QColor(255, 255, 255, alpha));
+        } else {
+            // Darken: multiply with gray (darker gray = more darkening)
+            painter->setCompositionMode(QPainter::CompositionMode_Multiply);
+            int grayValue = int(255 * (1.0 + m_brightness));  // 0 at brightness=-1, 255 at brightness=0
+            painter->setBrush(QColor(grayValue, grayValue, grayValue, 255));
+        }
+        painter->setPen(Qt::NoPen);
+        painter->drawRect(m_bounds);
+    }
+
+    // Contrast effect: overlay gray with SoftLight composition
+    // Reduces contrast when applied with gray closer to 128
+    // Note: QPainter doesn't have a perfect contrast mode, so we use an approximation
+    if (m_contrast != 0.0) {
+        if (m_contrast < 0.0) {
+            // Reduce contrast: blend toward middle gray
+            painter->setCompositionMode(QPainter::CompositionMode_SourceOver);
+            int alpha = int(-m_contrast * 80);  // Subtle effect
+            painter->setBrush(QColor(128, 128, 128, alpha));
+        } else {
+            // Increase contrast: use overlay mode with gray levels
+            // This naturally increases contrast (darks get darker, lights get lighter)
+            painter->setCompositionMode(QPainter::CompositionMode_Overlay);
+            int alpha = int(m_contrast * 60);  // Subtle effect
+            painter->setBrush(QColor(128, 128, 128, alpha));
+        }
+        painter->setPen(Qt::NoPen);
+        painter->drawRect(m_bounds);
+    }
+
+    painter->restore();
+}
+
 void LightingOverlay::paint(QPainter* painter, const QStyleOptionGraphicsItem* option, QWidget* widget)
 {
     Q_UNUSED(option)
-    Q_UNUSED(widget)
 
     if (!m_enabled) {
         return;
@@ -198,7 +249,19 @@ void LightingOverlay::paint(QPainter* painter, const QStyleOptionGraphicsItem* o
     // First, render ambient lighting overlay (darkening effect)
     renderAmbientOverlay(painter);
 
-    // Point lights removed - only ambient lighting now
+    // Apply DM-only brightness/contrast adjustment
+    // Use window detection pattern from CLAUDE.md
+    bool isDMWindow = false;
+    if (widget) {
+        QWidget* window = widget->window();
+        if (window && window->objectName() == "MainWindow") {
+            isDMWindow = true;
+        }
+    }
+
+    if (isDMWindow && (m_brightness != 0.0 || m_contrast != 0.0)) {
+        renderBrightnessContrast(painter);
+    }
 
     // Restore painter state
     painter->restore();

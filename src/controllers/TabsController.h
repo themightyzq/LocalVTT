@@ -5,7 +5,7 @@
 #include <QList>
 #include <QString>
 
-class QTabWidget;
+class QTabBar;
 class MapDisplay;
 class MapSession;
 
@@ -14,7 +14,7 @@ class TabsController : public QObject {
 public:
     explicit TabsController(QObject* parent = nullptr);
 
-    void attach(QTabWidget* tabs, MapDisplay* display, int maxTabs = 10);
+    void attach(QTabBar* tabBar, MapDisplay* display, int maxTabs = 10);
     void loadMapFile(const QString& path);
 
     // Get current map session
@@ -40,8 +40,9 @@ private:
     void switchToTab(int index);
     void closeTab(int index);
     QString shortTitle(const QString& filePath) const;
+    void setTabTooltipWithThumbnail(int tabIndex, const QString& filePath);
 
-    QTabWidget* m_tabs {nullptr};
+    QTabBar* m_tabBar {nullptr};
     MapDisplay* m_display {nullptr};
     QList<MapSession*> m_sessions;
     int m_currentIndex {-1};

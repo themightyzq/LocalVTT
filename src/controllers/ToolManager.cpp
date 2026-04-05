@@ -11,7 +11,6 @@
 #include <QAbstractButton>
 #include <QMessageBox>
 #include <QStatusBar>
-#include <iostream>
 
 ToolManager::ToolManager(MainWindow* mainWindow, MapDisplay* mapDisplay, QObject* parent)
     : QObject(parent)
@@ -27,8 +26,6 @@ ToolManager::ToolManager(MainWindow* mainWindow, MapDisplay* mapDisplay, QObject
     , m_fogBrushSlider(nullptr)
     , m_fogBrushLabel(nullptr)
     , m_unifiedFogAction(nullptr)
-    , m_drawPenAction(nullptr)
-    , m_drawEraserAction(nullptr)
     , m_undoAction(nullptr)
     , m_redoAction(nullptr)
     , m_fogToolButtonGroup(nullptr)
@@ -45,29 +42,11 @@ void ToolManager::setupFogToolModeSystem()
 
 void ToolManager::setActiveTool(ToolType tool)
 {
-    std::cerr << "ToolManager::setActiveTool called with tool: " << static_cast<int>(tool) << std::endl;
-    std::cerr.flush();
-
     if (m_activeToolType == tool) {
-        std::cerr << "ToolManager: Tool already active, returning" << std::endl;
-        std::cerr.flush();
         return;
     }
 
     m_activeToolType = tool;
-
-    switch (tool) {
-        case ToolType::Pointer:
-            std::cerr << "ToolManager: Switching to Pointer tool" << std::endl;
-            break;
-        case ToolType::FogBrush:
-            std::cerr << "ToolManager: Switching to FogBrush tool" << std::endl;
-            break;
-        case ToolType::FogRectangle:
-            std::cerr << "ToolManager: Switching to FogRectangle tool" << std::endl;
-            break;
-    }
-    std::cerr.flush();
 
     emit toolChanged(tool);
 
@@ -343,12 +322,6 @@ void ToolManager::updateFogToolModeUI()
     if (m_unifiedFogAction) {
         m_unifiedFogAction->setChecked(m_fogToolMode == FogToolMode::UnifiedFog);
     }
-    if (m_drawPenAction) {
-        m_drawPenAction->setChecked(m_fogToolMode == FogToolMode::DrawPen);
-    }
-    if (m_drawEraserAction) {
-        m_drawEraserAction->setChecked(m_fogToolMode == FogToolMode::DrawEraser);
-    }
 }
 
 void ToolManager::updateFogToolModeStatus()
@@ -365,8 +338,6 @@ QString ToolManager::getFogToolModeText(FogToolMode mode) const
 {
     switch (mode) {
         case FogToolMode::UnifiedFog: return "Unified Fog";
-        case FogToolMode::DrawPen: return "Draw Pen";
-        case FogToolMode::DrawEraser: return "Draw Eraser";
         default: return "Unknown";
     }
 }
@@ -376,10 +347,6 @@ QString ToolManager::getFogToolModeInstructions(FogToolMode mode) const
     switch (mode) {
         case FogToolMode::UnifiedFog:
             return "Click to reveal, Shift+Click to hide, Alt for rectangle";
-        case FogToolMode::DrawPen:
-            return "Click and drag to draw with pen";
-        case FogToolMode::DrawEraser:
-            return "Click and drag to erase";
         default:
             return "";
     }
@@ -407,23 +374,13 @@ void ToolManager::attachFogBrushSlider(QSlider* slider, QLabel* label)
     }
 }
 
-void ToolManager::attachFogToolActions(QAction* unifiedFog, QAction* drawPen, QAction* drawEraser)
+void ToolManager::attachFogToolActions(QAction* unifiedFog)
 {
     m_unifiedFogAction = unifiedFog;
-    m_drawPenAction = drawPen;
-    m_drawEraserAction = drawEraser;
 
     if (m_unifiedFogAction) {
         connect(m_unifiedFogAction, &QAction::triggered,
                 [this]() { setFogToolMode(FogToolMode::UnifiedFog); });
-    }
-    if (m_drawPenAction) {
-        connect(m_drawPenAction, &QAction::triggered,
-                [this]() { setFogToolMode(FogToolMode::DrawPen); });
-    }
-    if (m_drawEraserAction) {
-        connect(m_drawEraserAction, &QAction::triggered,
-                [this]() { setFogToolMode(FogToolMode::DrawEraser); });
     }
 }
 

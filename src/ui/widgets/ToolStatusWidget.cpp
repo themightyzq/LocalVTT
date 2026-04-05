@@ -1,4 +1,5 @@
 #include "ui/widgets/ToolStatusWidget.h"
+#include "ui/DarkTheme.h"
 #include "utils/AnimationHelper.h"
 #include <QLabel>
 #include <QHBoxLayout>
@@ -7,16 +8,6 @@
 #include <QGraphicsOpacityEffect>
 #include <QTimer>
 #include <QFontMetrics>
-
-namespace Colors {
-    const QColor BgPrimary{"#1a1a1a"};
-    const QColor BgSecondary{"#242424"};
-    const QColor AccentPrimary{"#4A90E2"};
-    const QColor AccentDanger{"#E74C3C"};
-    const QColor TextPrimary{"#E0E0E0"};
-    const QColor TextSecondary{"#B0B0B0"};
-    const QColor BorderColor{"#333333"};
-}
 
 ToolStatusWidget::ToolStatusWidget(QWidget* parent)
     : QWidget(parent)
@@ -55,12 +46,12 @@ void ToolStatusWidget::setupUI()
         "    font-weight: bold;"
         "    background: transparent;"
         "}"
-    ).arg(Colors::AccentPrimary.name()));
+    ).arg(DarkTheme::AccentPrimary.name()));
     
     QFrame* separator1 = new QFrame(this);
     separator1->setFrameShape(QFrame::VLine);
     separator1->setFixedSize(1, 20);
-    separator1->setStyleSheet(QString("QFrame { background-color: %1; }").arg(Colors::BorderColor.name()));
+    separator1->setStyleSheet(QString("QFrame { background-color: %1; }").arg(DarkTheme::BorderColor.name()));
     
     m_nameLabel = new QLabel(this);
     m_nameLabel->setMinimumWidth(80);
@@ -72,12 +63,12 @@ void ToolStatusWidget::setupUI()
         "    font-weight: 600;"
         "    background: transparent;"
         "}"
-    ).arg(Colors::TextPrimary.name()));
+    ).arg(DarkTheme::TextPrimary.name()));
     
     QFrame* separator2 = new QFrame(this);
     separator2->setFrameShape(QFrame::VLine);
     separator2->setFixedSize(1, 20);
-    separator2->setStyleSheet(QString("QFrame { background-color: %1; }").arg(Colors::BorderColor.name()));
+    separator2->setStyleSheet(QString("QFrame { background-color: %1; }").arg(DarkTheme::BorderColor.name()));
     
     m_hintLabel = new QLabel(this);
     m_hintLabel->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
@@ -88,7 +79,7 @@ void ToolStatusWidget::setupUI()
         "    font-style: italic;"
         "    background: transparent;"
         "}"
-    ).arg(Colors::TextSecondary.name()));
+    ).arg(DarkTheme::TextSecondary.name()));
     
     m_layout->addWidget(m_iconLabel);
     m_layout->addWidget(separator1);
@@ -188,7 +179,7 @@ void ToolStatusWidget::startFadeTransition()
     m_fadeAnimation->start();
 
     // Add a subtle highlight flash to draw attention to the change
-    AnimationHelper::animateToolHighlight(this, Colors::AccentPrimary);
+    AnimationHelper::animateToolHighlight(this, DarkTheme::AccentPrimary);
 }
 
 void ToolStatusWidget::onAnimationFinished()
@@ -272,8 +263,6 @@ QString ToolStatusWidget::getFogModeText(FogToolMode mode) const
 {
     switch (mode) {
         case FogToolMode::UnifiedFog: return "Unified Fog Tool";
-        case FogToolMode::DrawPen: return "Drawing Pen";
-        case FogToolMode::DrawEraser: return "Drawing Eraser";
         default: return "Unknown";
     }
 }
@@ -287,8 +276,8 @@ void ToolStatusWidget::paintEvent(QPaintEvent* event)
     
     QRect widgetRect = rect();
     
-    painter.setBrush(QBrush(Colors::BgSecondary));
-    painter.setPen(QPen(Colors::BorderColor, 1));
+    painter.setBrush(QBrush(DarkTheme::BgSecondary));
+    painter.setPen(QPen(DarkTheme::BorderColor, 1));
     painter.drawRoundedRect(widgetRect, 4, 4);
     
     QLinearGradient highlight(0, 0, 0, height());

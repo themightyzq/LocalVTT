@@ -1,20 +1,21 @@
 #include "graphics/MapDisplay.h"
-#include "opengl/OpenGLMapDisplay.h"
+#include "graphics/SceneBuilder.h"
 #include "ui/MainWindow.h"
 #include "utils/AnimationHelper.h"
 #include <QMessageBox>
 #include <QApplication>
-#include <iostream>
-
-// OpenGL is mandatory
-extern const bool g_useOpenGL;
 #include "graphics/GridOverlay.h"
 #include "graphics/FogOfWar.h"
-#include "graphics/WallSystem.h"
-#include "graphics/PortalSystem.h"
 #include "graphics/PingIndicator.h"
 #include "graphics/GMBeacon.h"
 #include "graphics/LightingOverlay.h"
+#include "graphics/WeatherEffect.h"
+#include "graphics/FogMistEffect.h"
+#include "graphics/LightningEffect.h"
+#include "graphics/PointLightSystem.h"
+#include "graphics/PointLight.h"
+#include "graphics/SceneAnimationDriver.h"
+#include "graphics/ZLayers.h"
 #include "graphics/ZoomIndicator.h"
 #include "graphics/LoadingProgressWidget.h"
 #include "utils/ImageLoader.h"
@@ -32,6 +33,7 @@ extern const bool g_useOpenGL;
 #include <QKeyEvent>
 #include <QScrollBar>
 #include <QPropertyAnimation>
+#include <QPointer>
 #include <QTimer>
 #include <QPainter>
 #include <QGraphicsTextItem>
@@ -42,9 +44,6 @@ extern const bool g_useOpenGL;
 #include <cmath>
 #include <QtMath>
 
-// Define static recursive mutex for thread-safe scene access
-QRecursiveMutex MapDisplay::s_sceneMutex;
-
 // Define static flag for app readiness
 bool MapDisplay::s_appReadyForProgress = false;
 
@@ -54,20 +53,18 @@ MapDisplay::MapDisplay(QWidget *parent)
     , m_mapItem(nullptr)
     , m_gridOverlay(nullptr)
     , m_fogOverlay(nullptr)
-    , m_wallSystem(nullptr)
-    , m_portalSystem(nullptr)
     , m_gridEnabled(true)
     , m_fogEnabled(true)
-    , m_wallsEnabled(false)
-    , m_portalsEnabled(false)
     , m_ownScene(true)
     , m_vttGridSize(0)
     , m_fogBrushSize(200)  // Default brush size (50% of max 400)
     , m_fogHideModeEnabled(false)
     , m_fogRectangleModeEnabled(false)
+    , m_beaconColor(255, 70, 70)  // Red default (brighter)
     , m_isSelectingRectangle(false)
     , m_selectionRectIndicator(nullptr)
     , m_isPanning(false)
+    , m_spacebarHeld(false)
     , m_lastMoveTime(0)
     , m_zoomFactor(1.0)
     , m_targetZoomFactor(1.0)
@@ -78,29 +75,39 @@ MapDisplay::MapDisplay(QWidget *parent)
     , m_isZoomAnimating(false)
     , m_zoomAccumulationTimer(nullptr)
     , m_zoomIndicator(nullptr)
-    , m_zoomControlsEnabled(true)
-    , m_lightingOverlay(nullptr)
-    , m_mainWindow(nullptr)
-    , m_pointLightPlacementMode(false)
-    , m_selectedPointLightIndicator(nullptr)
     , m_loadingProgressWidget(nullptr)
     , m_imageLoader(nullptr)
+    , m_zoomControlsEnabled(true)
+    , m_lightingOverlay(nullptr)
+    , m_animationDriver(nullptr)
+    , m_pointLightPlacementMode(false)
+    , m_currentLightPreset(LightPreset::Torch)
+    , m_isDraggingLight(false)
+    , m_selectedPointLightIndicator(nullptr)
+    , m_mainWindow(nullptr)
     , m_fogBrushPreview(nullptr)
     , m_brushSizeHUD(nullptr)
     , m_hudFadeTimer(nullptr)
     , m_currentTool(ToolType::Pointer)
     , m_currentFogMode(FogToolMode::UnifiedFog)
     , m_isDraggingTool(false)
-    , m_openglRenderingEnabled(false)
-    , m_openglDisplay(nullptr)
 {
     m_scene = new QGraphicsScene(this);
     setScene(m_scene);
+
+    // Create unified animation driver for atmosphere effects
+    m_animationDriver = new SceneAnimationDriver(this);
+    m_animationDriver->setScene(m_scene);
+    m_animationDriver->start();
 
     setRenderHint(QPainter::Antialiasing, true);
     setRenderHint(QPainter::SmoothPixmapTransform, true);
 
     setDragMode(QGraphicsView::NoDrag);
+
+    // Don't accept drops here - let MainWindow handle file drops
+    setAcceptDrops(false);
+    viewport()->setAcceptDrops(false);
 
     // CRITICAL FIX: Use black background for letterboxing support
     // When map doesn't match screen aspect ratio, black bars look professional
@@ -108,14 +115,15 @@ MapDisplay::MapDisplay(QWidget *parent)
 
     setFocusPolicy(Qt::ClickFocus);
 
-    m_gridOverlay = new GridOverlay();
-    m_fogOverlay = new FogOfWar();
-    m_fogOverlay->setChangeCallback([this](const QRectF& dirtyRegion) {
-        notifyFogChanged(dirtyRegion);
-    });
+    // Disable context menu - right-click is used for panning
+    setContextMenuPolicy(Qt::NoContextMenu);
 
-    // Initialize lighting effects with lazy loading
+    // Overlays are created by SceneBuilder on first map load
     m_lightingOverlay = nullptr;
+    m_weatherEffect = nullptr;
+    m_fogMistEffect = nullptr;
+    m_lightningEffect = nullptr;
+    m_pointLightSystem = nullptr;
 
     m_smoothPanTimer = new QTimer(this);
     m_smoothPanTimer->setInterval(16);
@@ -151,13 +159,9 @@ MapDisplay::MapDisplay(QWidget *parent)
     // Create fog brush preview circle
     m_fogBrushPreview = new QGraphicsEllipseItem();
     m_fogBrushPreview->setVisible(false);
-    m_fogBrushPreview->setZValue(1000); // High Z-value to show above everything
+    m_fogBrushPreview->setZValue(ZLayer::BrushPreview);
 
-    // THREAD SAFETY: Protect scene modification
-    {
-        QMutexLocker locker(&s_sceneMutex);
-        m_scene->addItem(m_fogBrushPreview);
-    }
+    m_scene->addItem(m_fogBrushPreview);
 
     // Create brush size HUD overlay
     m_brushSizeHUD = new QLabel(this);
@@ -181,7 +185,6 @@ MapDisplay::MapDisplay(QWidget *parent)
     m_hudFadeTimer->setInterval(2000); // 2 seconds
     connect(m_hudFadeTimer, &QTimer::timeout, this, &MapDisplay::hideBrushSizeHUD);
 
-    std::cerr << "[MapDisplay::MapDisplay] OpenGL disabled for stability" << std::endl;
 }
 
 MapDisplay::~MapDisplay()
@@ -210,9 +213,11 @@ MapDisplay::~MapDisplay()
         // Only need to clear our pointers
         m_gridOverlay = nullptr;
         m_fogOverlay = nullptr;
-        m_wallSystem = nullptr;
-        m_portalSystem = nullptr;  // CRITICAL FIX: Ensure consistency
         m_lightingOverlay = nullptr;
+        m_weatherEffect = nullptr;
+        m_fogMistEffect = nullptr;
+        m_lightningEffect = nullptr;
+        m_pointLightSystem = nullptr;
         m_mapItem = nullptr;
         m_fogBrushPreview = nullptr;
         m_selectionRectIndicator = nullptr;
@@ -220,7 +225,6 @@ MapDisplay::~MapDisplay()
         m_lightDebugItems.clear();
     }
 
-    // OpenGL display will be cleaned up automatically by Qt's parent-child system
 }
 
 bool MapDisplay::loadImage(const QString& path)
@@ -266,184 +270,25 @@ bool MapDisplay::loadImage(const QString& path)
 
     if (m_lightingOverlay) {
         m_lightingOverlay->setEnabled(false);
-        // Point light feature removed - no need to clear lights
+        // Point lights persist across map loads (managed via getPointLightSystem())
     }
 
-    // Clear scene - this deletes all items
-    // CRITICAL: Lock mutex for thread-safe scene modification
-    QMutexLocker locker(&s_sceneMutex);
-    m_scene->clear();
-
-    // CRITICAL: Reset ALL pointers since scene->clear() deleted them
-    // This prevents double-delete and use-after-free bugs
-    m_gridOverlay = nullptr;
-    m_fogOverlay = nullptr;
-    m_wallSystem = nullptr;
-    m_portalSystem = nullptr;  // CRITICAL FIX: Was missing, causing memory leak
-    m_mapItem = nullptr;
-    m_fogBrushPreview = nullptr;
-    m_lightingOverlay = nullptr;  // FIX: Was missing, causing memory leak
-    m_selectionRectIndicator = nullptr;
-    m_selectedPointLightIndicator = nullptr;
-
-
-    // Clear light debug items
-    m_lightDebugItems.clear();
-
-    // Create new map item
-    m_loadingProgressWidget->setProgress(55);
-    m_loadingProgressWidget->setLoadingText("Creating map display...");
-    QApplication::processEvents(QEventLoop::ExcludeUserInputEvents, 10);
-
-    QPixmap pixmap = QPixmap::fromImage(m_currentMap);
-
-    m_loadingProgressWidget->setProgress(60);
-    m_loadingProgressWidget->setLoadingText("Adding map to scene...");
-    QApplication::processEvents(QEventLoop::ExcludeUserInputEvents, 10);
-
-    // THREAD SAFETY: Protect scene modification
-    {
-        QMutexLocker locker(&s_sceneMutex);
-        m_mapItem = m_scene->addPixmap(pixmap);
-        m_mapItem->setZValue(0);
-        m_scene->setSceneRect(pixmap.rect());
-    }
-
-    // CRITICAL DIAGNOSTIC: Verify image rendering pipeline
-    // These checks catch the most common rendering failures immediately
-    if (!m_mapItem) {
-        DebugConsole::error("CRITICAL: Map item is nullptr after creation!", "Rendering");
-        return false;
-    }
-
-    if (!m_scene->items().contains(m_mapItem)) {
-        DebugConsole::error("CRITICAL: Map item not in scene after adding!", "Rendering");
-        return false;
-    }
-
-    if (m_mapItem->zValue() != 0) {
-        DebugConsole::warning(QString("Map item z-value incorrect: %1 (should be 0)").arg(m_mapItem->zValue()), "Rendering");
-    }
-
-    if (!m_mapItem->isVisible()) {
-        DebugConsole::error("CRITICAL: Map item is not visible!", "Rendering");
-        m_mapItem->setVisible(true);
-    }
-
-    if (m_scene->sceneRect() != pixmap.rect()) {
-        DebugConsole::warning("Scene rect doesn't match image rect", "Rendering");
-    }
-
-    // Log successful rendering for test verification
-    DebugConsole::info("IMAGE_RENDERED_SUCCESS: Map item added to scene", "Rendering");
-    DebugConsole::info(QString("Image dimensions: %1x%2").arg(pixmap.width()).arg(pixmap.height()), "Rendering");
-    DebugConsole::info(QString("Scene rect: %1x%2").arg(m_scene->width()).arg(m_scene->height()), "Rendering");
-
-    m_loadingProgressWidget->setProgress(65);
-    m_loadingProgressWidget->setLoadingText("Setting up overlays...");
-    QApplication::processEvents(QEventLoop::ExcludeUserInputEvents, 10);
-
-    // Recreate grid overlay
-    m_gridOverlay = new GridOverlay();
-    m_gridOverlay->setMapSize(pixmap.size());
-
-    // Apply VTT grid size if available
-    if (m_vttGridSize > 0) {
-        m_gridOverlay->setGridSize(m_vttGridSize);
-    }
-
-    if (m_gridEnabled) {
-        // THREAD SAFETY: Protect scene modification
-        {
-            QMutexLocker locker(&s_sceneMutex);
-            m_scene->addItem(m_gridOverlay);
-            m_gridOverlay->setZValue(1);
-        }
-    }
-
-    // Recreate wall system first (needed by fog overlay)
-    m_wallSystem = new WallSystem();
-    m_wallSystem->setMapSize(pixmap.size());
-    if (m_vttGridSize > 0) {
-        m_wallSystem->setPixelsPerGrid(m_vttGridSize);
-    }
-    if (m_wallsEnabled) {
-        // THREAD SAFETY: Protect scene modification
-        {
-            QMutexLocker locker(&s_sceneMutex);
-            m_scene->addItem(m_wallSystem);
-            m_wallSystem->setZValue(5);
-        }
-    }
-
-    // Recreate portal system
-    m_portalSystem = new PortalSystem();
-    m_portalSystem->setMapSize(pixmap.size());
-    if (m_vttGridSize > 0) {
-        m_portalSystem->setPixelsPerGrid(m_vttGridSize);
-    }
-    if (m_portalsEnabled) {
-        // THREAD SAFETY: Protect scene modification
-        {
-            QMutexLocker locker(&s_sceneMutex);
-            m_scene->addItem(m_portalSystem);
-            m_portalSystem->setZValue(10);
-        }
-    }
-
-    // Connect portal system to wall system for line-of-sight integration
-    m_wallSystem->setPortalSystem(m_portalSystem);
-
-    // Recreate fog overlay and connect to wall system
-    m_fogOverlay = new FogOfWar();
-    m_fogOverlay->setMapSize(pixmap.size());
-    m_fogOverlay->setWallSystem(m_wallSystem);  // Connect wall system for line-of-sight
-    if (!fogState.isEmpty()) {
-        m_fogOverlay->loadState(fogState);
-    }
-    // Reconnect fog change callback
-    m_fogOverlay->setChangeCallback([this](const QRectF& dirtyRegion) {
+    // Build scene with all overlays
+    SceneConfig config;
+    config.gridEnabled = m_gridEnabled;
+    config.fogEnabled = m_fogEnabled;
+    config.vttGridSize = m_vttGridSize;
+    config.fogState = fogState;
+    config.fogChangeCallback = [this](const QRectF& dirtyRegion) {
         notifyFogChanged(dirtyRegion);
-    });
+    };
 
-    // Recreate drawing overlay
-    if (m_fogEnabled) {
-        // THREAD SAFETY: Protect scene modification
-        {
-            QMutexLocker locker(&s_sceneMutex);
-            m_scene->addItem(m_fogOverlay);
-            m_fogOverlay->setZValue(2);
-        }
+    SceneContents contents = SceneBuilder::buildScene(m_scene, m_currentMap, config);
+    if (!contents.mapItem) {
+        return false;
     }
 
-    // Recreate fog brush preview circle
-    m_fogBrushPreview = new QGraphicsEllipseItem();
-    m_fogBrushPreview->setVisible(false);
-    m_fogBrushPreview->setZValue(1000); // High Z-value to show above everything
-    // THREAD SAFETY: Protect scene modification
-    {
-        QMutexLocker locker(&s_sceneMutex);
-        m_scene->addItem(m_fogBrushPreview);
-    }
-
-    // Recreate lighting overlay (was deleted by scene->clear())
-    // NOTE: Using lazy loading pattern to avoid unnecessary creation
-    m_lightingOverlay = nullptr;  // Will be created on demand via getLightingOverlay()
-
-    // Delay initial zoom to ensure view is properly sized
-    QTimer::singleShot(10, this, [this]() {
-        setInitialZoom();
-    });
-
-    // Ensure overlays are properly added to scene
-    updateGrid();
-    updateFog();
-
-    // Ensure all connected views get the initial fog state immediately
-    notifyFogChanged();
-
-    // SYNC FIX: Notify that scene now has content
-    emit scenePopulated();
+    applySceneContents(contents);
 
     return true;
 }
@@ -512,169 +357,26 @@ bool MapDisplay::loadImageWithProgress(const QString& path)
 
     if (m_lightingOverlay) {
         m_lightingOverlay->setEnabled(false);
-        // Point light feature removed - no need to clear lights
+        // Point lights persist across map loads (managed via getPointLightSystem())
     }
 
-    // Clear scene - this deletes all items
-    // CRITICAL: Lock mutex for thread-safe scene modification
-    QMutexLocker locker(&s_sceneMutex);
-    m_scene->clear();
-
-    // CRITICAL: Reset ALL pointers since scene->clear() deleted them
-    // This prevents double-delete and use-after-free bugs
-    m_gridOverlay = nullptr;
-    m_fogOverlay = nullptr;
-    m_wallSystem = nullptr;
-    m_portalSystem = nullptr;  // CRITICAL FIX: Was missing, causing memory leak
-    m_mapItem = nullptr;
-    m_fogBrushPreview = nullptr;
-    m_lightingOverlay = nullptr;  // FIX: Was missing, causing memory leak
-    m_selectionRectIndicator = nullptr;
-    m_selectedPointLightIndicator = nullptr;
-
-
-    // Clear light debug items
-    m_lightDebugItems.clear();
-
-    // Create new map item
-    m_loadingProgressWidget->setProgress(55);
-    m_loadingProgressWidget->setLoadingText("Creating map display...");
-    QApplication::processEvents(QEventLoop::ExcludeUserInputEvents, 10);
-
-    QPixmap pixmap = QPixmap::fromImage(m_currentMap);
-
-    m_loadingProgressWidget->setProgress(60);
-    m_loadingProgressWidget->setLoadingText("Adding map to scene...");
-    QApplication::processEvents(QEventLoop::ExcludeUserInputEvents, 10);
-
-    // THREAD SAFETY: Protect scene modification
-    {
-        QMutexLocker locker(&s_sceneMutex);
-        m_mapItem = m_scene->addPixmap(pixmap);
-        m_mapItem->setZValue(0);
-        m_scene->setSceneRect(pixmap.rect());
-    }
-
-    // CRITICAL DIAGNOSTIC: Verify image rendering pipeline
-    // These checks catch the most common rendering failures immediately
-    if (!m_mapItem) {
-        DebugConsole::error("CRITICAL: Map item is nullptr after creation!", "Rendering");
-        return false;
-    }
-
-    if (!m_scene->items().contains(m_mapItem)) {
-        DebugConsole::error("CRITICAL: Map item not in scene after adding!", "Rendering");
-        return false;
-    }
-
-    if (m_mapItem->zValue() != 0) {
-        DebugConsole::warning(QString("Map item z-value incorrect: %1 (should be 0)").arg(m_mapItem->zValue()), "Rendering");
-    }
-
-    if (!m_mapItem->isVisible()) {
-        DebugConsole::error("CRITICAL: Map item is not visible!", "Rendering");
-        m_mapItem->setVisible(true);
-    }
-
-    if (m_scene->sceneRect() != pixmap.rect()) {
-        DebugConsole::warning("Scene rect doesn't match image rect", "Rendering");
-    }
-
-    // Log successful rendering for test verification
-    DebugConsole::info("IMAGE_RENDERED_SUCCESS: Map item added to scene", "Rendering");
-    DebugConsole::info(QString("Image dimensions: %1x%2").arg(pixmap.width()).arg(pixmap.height()), "Rendering");
-    DebugConsole::info(QString("Scene rect: %1x%2").arg(m_scene->width()).arg(m_scene->height()), "Rendering");
-
-    m_loadingProgressWidget->setProgress(65);
-    m_loadingProgressWidget->setLoadingText("Setting up overlays...");
-    QApplication::processEvents(QEventLoop::ExcludeUserInputEvents, 10);
-
-    // Recreate grid overlay
-    m_gridOverlay = new GridOverlay();
-    m_gridOverlay->setMapSize(pixmap.size());
-
-    // Apply VTT grid size if available
-    if (m_vttGridSize > 0) {
-        m_gridOverlay->setGridSize(m_vttGridSize);
-    }
-
-    if (m_gridEnabled) {
-        // THREAD SAFETY: Protect scene modification
-        {
-            QMutexLocker locker(&s_sceneMutex);
-            m_scene->addItem(m_gridOverlay);
-            m_gridOverlay->setZValue(1);
-        }
-    }
-
-    // Recreate wall system first (needed by fog overlay)
-    m_wallSystem = new WallSystem();
-    m_wallSystem->setMapSize(pixmap.size());
-    if (m_vttGridSize > 0) {
-        m_wallSystem->setPixelsPerGrid(m_vttGridSize);
-    }
-    if (m_wallsEnabled) {
-        // THREAD SAFETY: Protect scene modification
-        {
-            QMutexLocker locker(&s_sceneMutex);
-            m_scene->addItem(m_wallSystem);
-            m_wallSystem->setZValue(5);
-        }
-    }
-
-    // Recreate portal system
-    m_portalSystem = new PortalSystem();
-    m_portalSystem->setMapSize(pixmap.size());
-    if (m_vttGridSize > 0) {
-        m_portalSystem->setPixelsPerGrid(m_vttGridSize);
-    }
-    if (m_portalsEnabled) {
-        // THREAD SAFETY: Protect scene modification
-        {
-            QMutexLocker locker(&s_sceneMutex);
-            m_scene->addItem(m_portalSystem);
-            m_portalSystem->setZValue(10);
-        }
-    }
-
-    // Connect portal system to wall system for line-of-sight integration
-    m_wallSystem->setPortalSystem(m_portalSystem);
-
-    // Recreate fog overlay and connect to wall system
-    m_fogOverlay = new FogOfWar();
-    m_fogOverlay->setMapSize(pixmap.size());
-    m_fogOverlay->setWallSystem(m_wallSystem);  // Connect wall system for line-of-sight
-    if (!fogState.isEmpty()) {
-        m_fogOverlay->loadState(fogState);
-    }
-    // Reconnect fog change callback
-    m_fogOverlay->setChangeCallback([this](const QRectF& dirtyRegion) {
+    // Build scene with all overlays
+    SceneConfig config;
+    config.gridEnabled = m_gridEnabled;
+    config.fogEnabled = m_fogEnabled;
+    config.vttGridSize = m_vttGridSize;
+    config.fogState = fogState;
+    config.fogChangeCallback = [this](const QRectF& dirtyRegion) {
         notifyFogChanged(dirtyRegion);
-    });
+    };
 
-    // Recreate drawing overlay
-    if (m_fogEnabled) {
-        // THREAD SAFETY: Protect scene modification
-        {
-            QMutexLocker locker(&s_sceneMutex);
-            m_scene->addItem(m_fogOverlay);
-            m_fogOverlay->setZValue(2);
-        }
+    SceneContents contents = SceneBuilder::buildScene(m_scene, m_currentMap, config);
+    if (!contents.mapItem) {
+        m_loadingProgressWidget->hideProgress();
+        return false;
     }
 
-    // Recreate fog brush preview circle
-    m_fogBrushPreview = new QGraphicsEllipseItem();
-    m_fogBrushPreview->setVisible(false);
-    m_fogBrushPreview->setZValue(1000); // High Z-value to show above everything
-    // THREAD SAFETY: Protect scene modification
-    {
-        QMutexLocker locker(&s_sceneMutex);
-        m_scene->addItem(m_fogBrushPreview);
-    }
-
-    // Use lazy loading for lighting effects
-    // m_lightingOverlay will be created on demand via getLightingOverlay()
-    m_lightingOverlay = nullptr;
+    applySceneContents(contents);
 
     // Apply VTT lighting and parsed lights if available
     // CRITICAL FIX: Use already loaded VTT data instead of loading again
@@ -684,28 +386,6 @@ bool MapDisplay::loadImageWithProgress(const QString& path)
 
         applyVTTLighting(vttData.globalLight, vttData.darkness);
         setParsedLights(vttData.lights);
-
-        // Load wall data from VTT file
-        if (!vttData.walls.isEmpty() && m_wallSystem) {
-            QList<WallSystem::Wall> walls;
-            for (const auto& vttWall : vttData.walls) {
-                walls.append(WallSystem::Wall(vttWall.line));
-            }
-            m_wallSystem->setWalls(walls);
-            DebugConsole::vtt(QString("Loaded %1 walls from VTT file").arg(walls.size()), "VTT Parsing");
-        }
-
-        // Load portal data from VTT file
-        if (!vttData.portals.isEmpty() && m_portalSystem) {
-            QList<PortalSystem::PortalData> portals;
-            for (const auto& vttPortal : vttData.portals) {
-                PortalSystem::PortalData portal(vttPortal.position, vttPortal.bound1, vttPortal.bound2,
-                                               vttPortal.rotation, vttPortal.closed, vttPortal.freestanding);
-                portals.append(portal);
-            }
-            m_portalSystem->setPortals(portals);
-            DebugConsole::vtt(QString("Loaded %1 portals from VTT file").arg(portals.size()), "Graphics");
-        }
     }
 
     // CRITICAL FIX: Ensure progress reaches 100% before hiding
@@ -713,38 +393,22 @@ bool MapDisplay::loadImageWithProgress(const QString& path)
     m_loadingProgressWidget->setLoadingText("Loading complete");
 
     // Hide progress widget after a brief moment to show completion
-    QTimer::singleShot(200, this, [this]() {
-        m_loadingProgressWidget->hideProgress();
+    QPointer<MapDisplay> self = this;
+    QTimer::singleShot(200, this, [self]() {
+        if (self && self->m_loadingProgressWidget) self->m_loadingProgressWidget->hideProgress();
     });
 
-    // Delay initial zoom to ensure view is properly sized
-    QTimer::singleShot(250, this, [this]() {
-        setInitialZoom();
-    });
-
-    // CRITICAL FIX: Ensure image is visible regardless of OpenGL state
     // Force update of the scene to ensure map item is properly rendered
     if (m_mapItem) {
         m_mapItem->setVisible(true);
         m_mapItem->update();
     }
-    
+
     // Force scene update and view refresh
     if (m_scene) {
         m_scene->update();
     }
     update();
-    
-
-    // Ensure overlays are properly added to scene
-    updateGrid();
-    updateFog();
-
-    // Ensure all connected views get the initial fog state immediately
-    notifyFogChanged();
-
-    // SYNC FIX: Notify that scene now has content
-    emit scenePopulated();
 
     return true;
 }
@@ -777,156 +441,35 @@ bool MapDisplay::loadImageFromCache(const QImage& cachedImage, const VTTLoader::
 
     if (m_lightingOverlay) {
         m_lightingOverlay->setEnabled(false);
-        // Point light feature removed - no lights to clear
+        // Point lights persist across map loads (managed via getPointLightSystem())
     }
 
     m_loadingProgressWidget->setProgress(50);
 
-    // Clear scene - this deletes all items
-    QMutexLocker locker(&s_sceneMutex);
-    m_scene->clear();
+    // Build scene with all overlays
+    SceneConfig config;
+    config.gridEnabled = m_gridEnabled;
+    config.fogEnabled = m_fogEnabled;
+    config.vttGridSize = m_vttGridSize;
+    config.fogState = fogState;
+    config.fogChangeCallback = [this](const QRectF& dirtyRegion) {
+        notifyFogChanged(dirtyRegion);
+    };
 
-    // Reset ALL pointers since scene->clear() deleted them
-    m_gridOverlay = nullptr;
-    m_fogOverlay = nullptr;
-    m_wallSystem = nullptr;
-    m_portalSystem = nullptr;
-    m_mapItem = nullptr;
-    m_fogBrushPreview = nullptr;
-    m_lightingOverlay = nullptr;
-    m_selectionRectIndicator = nullptr;
-    m_selectedPointLightIndicator = nullptr;
-    m_lightDebugItems.clear();
+    SceneContents contents = SceneBuilder::buildScene(m_scene, m_currentMap, config);
+    if (!contents.mapItem) {
+        m_loadingProgressWidget->hideProgress();
+        return false;
+    }
+
+    applySceneContents(contents);
 
     m_loadingProgressWidget->setProgress(75);
-
-    // Create new map item from cached image
-    // THREAD SAFETY: Protect scene modification
-    {
-        QMutexLocker locker(&s_sceneMutex);
-        m_mapItem = m_scene->addPixmap(QPixmap::fromImage(m_currentMap));
-        if (!m_mapItem) {
-            m_loadingProgressWidget->hideProgress();
-            return false;
-        }
-        // Set scene rect
-        m_scene->setSceneRect(m_currentMap.rect());
-    }
-
-    // Initialize all overlays (same as original implementation)
-    QPixmap pixmap = QPixmap::fromImage(m_currentMap);
-
-    // Recreate grid overlay
-    m_gridOverlay = new GridOverlay();
-    m_gridOverlay->setMapSize(pixmap.size());
-
-    // Apply VTT grid size if available
-    if (m_vttGridSize > 0) {
-        m_gridOverlay->setGridSize(m_vttGridSize);
-    }
-
-    if (m_gridEnabled) {
-        // THREAD SAFETY: Protect scene modification
-        {
-            QMutexLocker locker(&s_sceneMutex);
-            m_scene->addItem(m_gridOverlay);
-            m_gridOverlay->setZValue(1);
-        }
-    }
-
-    // Recreate wall system first (needed by fog overlay)
-    m_wallSystem = new WallSystem();
-    m_wallSystem->setMapSize(pixmap.size());
-    if (m_vttGridSize > 0) {
-        m_wallSystem->setPixelsPerGrid(m_vttGridSize);
-    }
-    if (m_wallsEnabled) {
-        // THREAD SAFETY: Protect scene modification
-        {
-            QMutexLocker locker(&s_sceneMutex);
-            m_scene->addItem(m_wallSystem);
-            m_wallSystem->setZValue(5);
-        }
-    }
-
-    // Recreate portal system
-    m_portalSystem = new PortalSystem();
-    m_portalSystem->setMapSize(pixmap.size());
-    if (m_vttGridSize > 0) {
-        m_portalSystem->setPixelsPerGrid(m_vttGridSize);
-    }
-    if (m_portalsEnabled) {
-        // THREAD SAFETY: Protect scene modification
-        {
-            QMutexLocker locker(&s_sceneMutex);
-            m_scene->addItem(m_portalSystem);
-            m_portalSystem->setZValue(10);
-        }
-    }
-
-    // Connect portal system to wall system for line-of-sight integration
-    m_wallSystem->setPortalSystem(m_portalSystem);
-
-    // Recreate fog overlay and connect to wall system
-    m_fogOverlay = new FogOfWar();
-    m_fogOverlay->setMapSize(pixmap.size());
-    m_fogOverlay->setWallSystem(m_wallSystem);  // Connect wall system for line-of-sight
-
-    // Reconnect fog change callback
-    m_fogOverlay->setChangeCallback([this](const QRectF& dirtyRegion) {
-        notifyFogChanged(dirtyRegion);
-    });
-
-    // Recreate drawing overlay
-
-    if (m_fogEnabled) {
-        // THREAD SAFETY: Protect scene modification
-        {
-            QMutexLocker locker(&s_sceneMutex);
-            m_scene->addItem(m_fogOverlay);
-            m_fogOverlay->setZValue(2);
-        }
-    }
-
-    // Recreate fog brush preview circle
-    m_fogBrushPreview = new QGraphicsEllipseItem();
-    m_fogBrushPreview->setVisible(false);
-    m_fogBrushPreview->setZValue(1000); // High Z-value to show above everything
-    // THREAD SAFETY: Protect scene modification
-    {
-        QMutexLocker locker(&s_sceneMutex);
-        m_scene->addItem(m_fogBrushPreview);
-    }
-
-    // Use lazy loading for lighting effects
-    m_lightingOverlay = nullptr;
 
     // Process VTT data if available
     if (vttData.isValid) {
         // Apply VTT lighting data
         setParsedLights(vttData.lights);
-
-        // Apply VTT wall data
-        if (!vttData.walls.isEmpty() && m_wallSystem) {
-            QList<WallSystem::Wall> walls;
-            for (const auto& vttWall : vttData.walls) {
-                walls.append(WallSystem::Wall(vttWall.line));
-            }
-            m_wallSystem->setWalls(walls);
-            DebugConsole::vtt(QString("Loaded %1 walls from VTT file").arg(walls.size()), "VTT Parsing");
-        }
-
-        // Apply VTT portal data
-        if (!vttData.portals.isEmpty() && m_portalSystem) {
-            QList<PortalSystem::PortalData> portals;
-            for (const auto& vttPortal : vttData.portals) {
-                PortalSystem::PortalData portal(vttPortal.position, vttPortal.bound1, vttPortal.bound2,
-                                               vttPortal.rotation, vttPortal.closed, vttPortal.freestanding);
-                portals.append(portal);
-            }
-            m_portalSystem->setPortals(portals);
-            DebugConsole::vtt(QString("Loaded %1 portals from VTT file").arg(portals.size()), "Graphics");
-        }
     }
 
     m_loadingProgressWidget->setProgress(90);
@@ -937,28 +480,18 @@ bool MapDisplay::loadImageFromCache(const QImage& cachedImage, const VTTLoader::
     m_loadingProgressWidget->setProgress(100);
     m_loadingProgressWidget->hideProgress();
 
-    // Set initial zoom after a brief delay for UI responsiveness
-    QTimer::singleShot(50, this, [this]() {
-        setInitialZoom();
-    });
-
     // CRITICAL FIX: Ensure cached image visibility
     // Force map item visibility and scene refresh
     if (m_mapItem) {
         m_mapItem->setVisible(true);
         m_mapItem->update();
     }
-    
+
     // Ensure scene is properly updated
     if (m_scene) {
         m_scene->update();
     }
     update();
-    
-
-    // Ensure overlays are properly added to scene
-    updateGrid();
-    updateFog();
 
     DebugConsole::performance("Successfully loaded from cache", "Graphics");
     return true;
@@ -974,8 +507,8 @@ void MapDisplay::setParsedLights(const QList<VTTLoader::LightSource>& lights)
     m_parsedLights = lights;
     updateParsedLightOverlays();
 
-    // Convert VTT lights to PointLight objects and add to lighting overlay
-    // Point light feature removed - VTT lights not supported
+    // VTT file lights stored for debug visualization only
+    // Auto-conversion to PointLightSystem disabled (use manual placement instead)
     Q_UNUSED(lights);
 }
 
@@ -991,8 +524,6 @@ void MapDisplay::updateParsedLightOverlays()
     if (!m_lightDebugItems.isEmpty()) {
         for (auto* item : m_lightDebugItems) {
             if (item && m_scene) {
-                // THREAD SAFETY: Protect scene modification
-                QMutexLocker locker(&s_sceneMutex);
                 m_scene->removeItem(item);
             }
             delete item;
@@ -1005,13 +536,8 @@ void MapDisplay::updateParsedLightOverlays()
     for (const auto& l : m_parsedLights) {
         qreal r = qMax<qreal>(8.0, l.brightRadius);
         QRectF rect(l.position.x() - r, l.position.y() - r, r*2, r*2);
-        // THREAD SAFETY: Protect scene modification
-        QGraphicsEllipseItem* ellipse;
-        {
-            QMutexLocker locker(&s_sceneMutex);
-            ellipse = m_scene->addEllipse(rect, QPen(QColor(255, 255, 0, 200), 2), QBrush(Qt::NoBrush));
-            ellipse->setZValue(700);
-        }
+        QGraphicsEllipseItem* ellipse = m_scene->addEllipse(rect, QPen(QColor(255, 255, 0, 200), 2), QBrush(Qt::NoBrush));
+        ellipse->setZValue(ZLayer::BrushPreview);
         m_lightDebugItems.append(ellipse);
     }
 }
@@ -1037,8 +563,6 @@ void MapDisplay::updateFogBrushPreview(const QPointF& scenePos, Qt::KeyboardModi
                 diameter, diameter);
     m_fogBrushPreview->setRect(rect);
 
-    // Set color based on modifier keys for unified fog mode (Photoshop-style)
-    FogToolMode mode = getCurrentFogToolMode();
     // Always green for reveal mode (no hide mode)
     QColor previewColor = QColor(100, 255, 100, 128);
 
@@ -1080,7 +604,7 @@ void MapDisplay::showFogBrushPreview(bool show)
 
         // Ensure proper Z-level when showing
         if (shouldShow) {
-            m_fogBrushPreview->setZValue(1000);
+            m_fogBrushPreview->setZValue(ZLayer::BrushPreview);
             m_fogBrushPreview->update();
         }
     }
@@ -1088,30 +612,14 @@ void MapDisplay::showFogBrushPreview(bool show)
 
 void MapDisplay::shareScene(MapDisplay* sourceDisplay)
 {
-    std::cerr << "\n=== [MapDisplay::shareScene] START ===" << std::endl;
-
     if (!sourceDisplay) {
-        std::cerr << "[MapDisplay::shareScene] ERROR: Source display is NULL" << std::endl;
-        std::cerr.flush();
         return;
     }
 
-    std::cerr << "[MapDisplay::shareScene] Source scene: " << sourceDisplay->getScene() << std::endl;
-
     if (!sourceDisplay->getScene()) {
-        std::cerr << "[MapDisplay::shareScene] ERROR: Source scene is NULL" << std::endl;
-        std::cerr.flush();
         DebugConsole::warning("Source scene is NULL, cannot share", "Graphics");
         return;
     }
-
-    std::cerr << "[MapDisplay::shareScene] Source scene items: "
-              << sourceDisplay->getScene()->items().count() << std::endl;
-    std::cerr << "[MapDisplay::shareScene] Source has mapItem: "
-              << (sourceDisplay->m_mapItem ? "YES" : "NO") << std::endl;
-    std::cerr << "[MapDisplay::shareScene] Source has currentMap: "
-              << (!sourceDisplay->m_currentMap.isNull() ? "YES" : "NO") << std::endl;
-    std::cerr.flush();
 
     if (m_zoomAnimation) {
         m_zoomAnimation->stop();
@@ -1125,33 +633,20 @@ void MapDisplay::shareScene(MapDisplay* sourceDisplay)
 
     m_isZoomAnimating = false;
 
-    std::cerr << "[MapDisplay::shareScene] Setting m_ownScene = false" << std::endl;
     m_ownScene = false;
     m_scene = sourceDisplay->getScene();
-    std::cerr << "[MapDisplay::shareScene] Assigned scene pointer: " << m_scene << std::endl;
 
     if (m_scene) {
-        std::cerr << "[MapDisplay::shareScene] Calling setScene()..." << std::endl;
-        std::cerr.flush();
         setScene(m_scene);
-        std::cerr << "[MapDisplay::shareScene] setScene() complete, items visible: "
-                  << m_scene->items().count() << std::endl;
     }
 
     if (sourceDisplay->m_mapItem) {
-        std::cerr << "[MapDisplay::shareScene] Sharing mapItem pointer" << std::endl;
         m_mapItem = sourceDisplay->m_mapItem;
-    } else {
-        std::cerr << "[MapDisplay::shareScene] WARNING: Source mapItem is NULL" << std::endl;
     }
 
     if (!sourceDisplay->m_currentMap.isNull()) {
-        std::cerr << "[MapDisplay::shareScene] Sharing currentMap image" << std::endl;
         m_currentMap = sourceDisplay->m_currentMap;
-    } else {
-        std::cerr << "[MapDisplay::shareScene] WARNING: Source currentMap is NULL" << std::endl;
     }
-    std::cerr.flush();
 
     if (sourceDisplay->m_gridOverlay) {
         m_gridOverlay = sourceDisplay->m_gridOverlay;
@@ -1159,19 +654,11 @@ void MapDisplay::shareScene(MapDisplay* sourceDisplay)
     if (sourceDisplay->m_fogOverlay) {
         m_fogOverlay = sourceDisplay->m_fogOverlay;
     }
-    if (sourceDisplay->m_wallSystem) {
-        m_wallSystem = sourceDisplay->m_wallSystem;
-    }
-    if (sourceDisplay->m_portalSystem) {
-        m_portalSystem = sourceDisplay->m_portalSystem;
-    }
     if (sourceDisplay->m_lightingOverlay) {
         m_lightingOverlay = sourceDisplay->m_lightingOverlay;
     }
     m_gridEnabled = sourceDisplay->m_gridEnabled;
     m_fogEnabled = sourceDisplay->m_fogEnabled;
-    m_wallsEnabled = sourceDisplay->m_wallsEnabled;
-    m_portalsEnabled = sourceDisplay->m_portalsEnabled;
 
     m_zoomFactor = sourceDisplay->m_zoomFactor;
     m_targetZoomFactor = m_zoomFactor;
@@ -1181,99 +668,59 @@ void MapDisplay::shareScene(MapDisplay* sourceDisplay)
     scale(m_zoomFactor, m_zoomFactor);
 
     if (m_mapItem) {
-        std::cerr << "[MapDisplay::shareScene] Making mapItem visible and updating" << std::endl;
         m_mapItem->setVisible(true);
         m_mapItem->update();
     }
 
     if (m_scene) {
-        std::cerr << "[MapDisplay::shareScene] Updating scene" << std::endl;
         m_scene->update();
     }
 
-    std::cerr << "[MapDisplay::shareScene] Calling update() on view" << std::endl;
     update();
-
-    std::cerr << "=== [MapDisplay::shareScene] END ===" << std::endl;
-    std::cerr.flush();
 }
 
 void MapDisplay::updateSharedScene()
 {
-    std::cerr << "\n=== [MapDisplay::updateSharedScene] START ===" << std::endl;
-    std::cerr << "[MapDisplay::updateSharedScene] m_ownScene: " << m_ownScene
-              << ", m_scene: " << m_scene << std::endl;
-
     if (!m_ownScene && m_scene) {
-        std::cerr << "[MapDisplay::updateSharedScene] Shared scene detected, updating..." << std::endl;
-        std::cerr << "[MapDisplay::updateSharedScene] Scene items before: "
-                  << m_scene->items().count() << std::endl;
-        std::cerr.flush();
 
-        QMutexLocker locker(&s_sceneMutex);
 
-        std::cerr << "[MapDisplay::updateSharedScene] Invalidating scene..." << std::endl;
         m_scene->invalidate();
         m_scene->update(m_scene->sceneRect());
 
-        std::cerr << "[MapDisplay::updateSharedScene] Clearing and resetting scene pointer..." << std::endl;
         setScene(nullptr);
         setScene(m_scene);
 
-        std::cerr << "[MapDisplay::updateSharedScene] Scene items after reset: "
-                  << m_scene->items().count() << std::endl;
-
         if (viewport()) {
-            std::cerr << "[MapDisplay::updateSharedScene] Updating viewport..." << std::endl;
             viewport()->update();
         }
 
-        std::cerr << "[MapDisplay::updateSharedScene] Calling update()..." << std::endl;
         update();
-    } else {
-        std::cerr << "[MapDisplay::updateSharedScene] Skipping - not a shared scene" << std::endl;
     }
-
-    std::cerr << "=== [MapDisplay::updateSharedScene] END ===" << std::endl;
-    std::cerr.flush();
 }
 
 void MapDisplay::copyMapFrom(MapDisplay* sourceDisplay)
 {
-    std::cerr << "\n=== [MapDisplay::copyMapFrom] START - NEW ARCHITECTURE ===" << std::endl;
-
     if (!sourceDisplay) {
-        std::cerr << "[MapDisplay::copyMapFrom] ERROR: Source display is NULL" << std::endl;
-        std::cerr.flush();
         return;
     }
 
     QImage sourceImage = sourceDisplay->getCurrentMapImage();
     if (sourceImage.isNull()) {
-        std::cerr << "[MapDisplay::copyMapFrom] ERROR: Source image is NULL" << std::endl;
-        std::cerr.flush();
         return;
     }
 
-    std::cerr << "[MapDisplay::copyMapFrom] Source image size: " << sourceImage.width() << "x" << sourceImage.height() << std::endl;
-    std::cerr << "[MapDisplay::copyMapFrom] THIS owns scene: " << m_ownScene << std::endl;
-    std::cerr.flush();
 
-    QMutexLocker locker(&s_sceneMutex);
 
     m_currentMap = sourceImage;
 
     if (m_mapItem) {
-        std::cerr << "[MapDisplay::copyMapFrom] Updating existing mapItem with new pixmap" << std::endl;
         m_mapItem->setPixmap(QPixmap::fromImage(m_currentMap));
     } else {
-        std::cerr << "[MapDisplay::copyMapFrom] Creating NEW mapItem" << std::endl;
         m_mapItem = new QGraphicsPixmapItem(QPixmap::fromImage(m_currentMap));
         m_mapItem->setTransformationMode(Qt::SmoothTransformation);
-        m_mapItem->setZValue(-1);
+        m_mapItem->setZValue(ZLayer::Map);
 
         if (m_scene) {
-            std::cerr << "[MapDisplay::copyMapFrom] Adding mapItem to scene" << std::endl;
             m_scene->addItem(m_mapItem);
         }
     }
@@ -1281,7 +728,6 @@ void MapDisplay::copyMapFrom(MapDisplay* sourceDisplay)
     if (m_scene && m_mapItem) {
         QRectF imageRect = m_mapItem->boundingRect();
         m_scene->setSceneRect(imageRect);
-        std::cerr << "[MapDisplay::copyMapFrom] Scene rect set to: " << imageRect.width() << "x" << imageRect.height() << std::endl;
     }
 
     m_zoomFactor = sourceDisplay->m_zoomFactor;
@@ -1289,14 +735,10 @@ void MapDisplay::copyMapFrom(MapDisplay* sourceDisplay)
     resetTransform();
     scale(m_zoomFactor, m_zoomFactor);
 
-    std::cerr << "[MapDisplay::copyMapFrom] Calling update() on scene and view" << std::endl;
     if (m_scene) {
         m_scene->update();
     }
     update();
-
-    std::cerr << "=== [MapDisplay::copyMapFrom] END - Map copied successfully ===" << std::endl;
-    std::cerr.flush();
 }
 
 void MapDisplay::setGridEnabled(bool enabled)
@@ -1416,68 +858,6 @@ void MapDisplay::resetFog()
     }
 }
 
-void MapDisplay::setWallsEnabled(bool enabled)
-{
-    m_wallsEnabled = enabled;
-    if (m_wallSystem) {
-        if (enabled) {
-            if (!m_scene->items().contains(m_wallSystem)) {
-                // THREAD SAFETY: Protect scene modification
-                {
-                    QMutexLocker locker(&s_sceneMutex);
-                    m_scene->addItem(m_wallSystem);
-                    m_wallSystem->setZValue(5);
-                }
-            }
-            m_wallSystem->setVisible(true);
-        } else {
-            m_wallSystem->setVisible(false);
-        }
-    }
-}
-
-void MapDisplay::setWallDebugRenderingEnabled(bool enabled)
-{
-    if (m_wallSystem) {
-        m_wallSystem->setDebugRenderingEnabled(enabled);
-    }
-}
-
-bool MapDisplay::isWallDebugRenderingEnabled() const
-{
-    return m_wallSystem ? m_wallSystem->isDebugRenderingEnabled() : false;
-}
-
-void MapDisplay::setPortalsEnabled(bool enabled)
-{
-    m_portalsEnabled = enabled;
-    if (m_portalSystem) {
-        if (enabled) {
-            if (!m_scene->items().contains(m_portalSystem)) {
-                // THREAD SAFETY: Protect scene modification
-                {
-                    QMutexLocker locker(&s_sceneMutex);
-                    m_scene->addItem(m_portalSystem);
-                    m_portalSystem->setZValue(10);
-                }
-            }
-            m_portalSystem->setVisible(true);
-        } else {
-            m_portalSystem->setVisible(false);
-        }
-    }
-}
-
-void MapDisplay::togglePortalAt(const QPointF& scenePos)
-{
-    if (m_portalSystem && m_portalsEnabled) {
-        bool toggled = m_portalSystem->togglePortalAt(scenePos);
-        if (toggled) {
-            DebugConsole::info(QString("Portal toggled at scene position: (%1, %2)").arg(scenePos.x()).arg(scenePos.y()), "Graphics");
-        }
-    }
-}
-
 void MapDisplay::setFogBrushSize(int size)
 {
     m_fogBrushSize = qBound(10, size, 400);  // Doubled maximum size from 200 to 400
@@ -1511,11 +891,7 @@ void MapDisplay::setFogRectangleModeEnabled(bool enabled)
     if (!enabled && m_isSelectingRectangle) {
         m_isSelectingRectangle = false;
         if (m_selectionRectIndicator) {
-            // THREAD SAFETY: Protect scene modification
-            {
-                QMutexLocker locker(&s_sceneMutex);
-                m_scene->removeItem(m_selectionRectIndicator);
-            }
+            m_scene->removeItem(m_selectionRectIndicator);
             delete m_selectionRectIndicator;
             m_selectionRectIndicator = nullptr;
         }
@@ -1537,19 +913,45 @@ int MapDisplay::getGridSize() const
     return 50;
 }
 
+void MapDisplay::applySceneContents(const SceneContents& contents)
+{
+    m_mapItem = contents.mapItem;
+    m_gridOverlay = contents.gridOverlay;
+    m_fogOverlay = contents.fogOverlay;
+    m_fogBrushPreview = contents.fogBrushPreview;
+
+    // Effect overlays use lazy loading (created on demand)
+    m_lightingOverlay = nullptr;
+    m_weatherEffect = nullptr;
+    m_fogMistEffect = nullptr;
+    m_lightningEffect = nullptr;
+    m_pointLightSystem = nullptr;
+    m_selectionRectIndicator = nullptr;
+    m_selectedPointLightIndicator = nullptr;
+    m_lightDebugItems.clear();
+
+    updateGrid();
+    updateFog();
+    notifyFogChanged();
+
+    QPointer<MapDisplay> zoomSelf = this;
+    QTimer::singleShot(10, this, [zoomSelf]() {
+        if (zoomSelf) zoomSelf->setInitialZoom();
+    });
+
+    emit scenePopulated();
+}
+
 void MapDisplay::updateGrid()
 {
     if (!m_gridOverlay || !m_scene) {
         return;
     }
 
-    // THREAD SAFETY: Protect scene modification
-    QMutexLocker locker(&s_sceneMutex);
-
     if (m_gridEnabled) {
-        if (!m_scene->items().contains(m_gridOverlay)) {
+        if (m_gridOverlay->scene() != m_scene) {
             m_scene->addItem(m_gridOverlay);
-            m_gridOverlay->setZValue(1);
+            m_gridOverlay->setZValue(ZLayer::Grid);
         }
         m_gridOverlay->setVisible(true);
     } else {
@@ -1563,13 +965,10 @@ void MapDisplay::updateFog()
         return;
     }
 
-    // THREAD SAFETY: Protect scene modification
-    QMutexLocker locker(&s_sceneMutex);
-
     if (m_fogEnabled) {
-        if (!m_scene->items().contains(m_fogOverlay)) {
+        if (m_fogOverlay->scene() != m_scene) {
             m_scene->addItem(m_fogOverlay);
-            m_fogOverlay->setZValue(2);
+            m_fogOverlay->setZValue(ZLayer::Fog);
         }
         m_fogOverlay->setVisible(true);
     } else {
@@ -1669,13 +1068,6 @@ void MapDisplay::resizeEvent(QResizeEvent *event)
         m_loadingProgressWidget->updatePosition();
     }
 
-    // Keep OpenGL overlay in sync with view size
-    if (m_openglDisplay) {
-        m_openglDisplay->resize(size());
-        m_openglDisplay->move(0, 0);
-        // CRITICAL FIX: Don't raise OpenGL - keep it in background
-        m_openglDisplay->lower();
-    }
 }
 
 void MapDisplay::wheelEvent(QWheelEvent *event)
@@ -1685,6 +1077,32 @@ void MapDisplay::wheelEvent(QWheelEvent *event)
         return;
     }
 
+    // Check for modifier keys to determine behavior:
+    // - Ctrl/Cmd + scroll = zoom (standard Mac/Windows behavior)
+    // - Plain scroll = pan vertically (trackpad-friendly)
+    // - Shift + scroll = pan horizontally
+    bool hasControlModifier = event->modifiers() & Qt::ControlModifier;
+    bool hasShiftModifier = event->modifiers() & Qt::ShiftModifier;
+
+    // Without Ctrl/Cmd, use scroll for panning instead of zooming
+    if (!hasControlModifier) {
+        // Pan mode - scroll wheel moves the view
+        int deltaY = event->angleDelta().y();
+        int deltaX = event->angleDelta().x();
+
+        // Shift+scroll = horizontal pan
+        if (hasShiftModifier) {
+            horizontalScrollBar()->setValue(horizontalScrollBar()->value() - deltaY);
+        } else {
+            // Normal scroll = vertical pan, also respect horizontal component
+            verticalScrollBar()->setValue(verticalScrollBar()->value() - deltaY);
+            horizontalScrollBar()->setValue(horizontalScrollBar()->value() - deltaX);
+        }
+        event->accept();
+        return;
+    }
+
+    // Ctrl/Cmd + scroll = zoom
     // Stop momentum when user starts interacting
     if (m_smoothPanTimer->isActive()) {
         m_smoothPanTimer->stop();
@@ -1733,8 +1151,13 @@ void MapDisplay::mousePressEvent(QMouseEvent *event)
         m_smoothPanTimer->stop();
         m_panVelocity = QPointF(0, 0);
     }
-    // Middle mouse button for panning (no modifiers)
-    if (event->button() == Qt::MiddleButton) {
+    // Panning options:
+    // - Middle mouse button (always)
+    // - Spacebar + Left click (trackpad-friendly)
+    // - Shift + Right click (avoids trackpad zoom interference)
+    if (event->button() == Qt::MiddleButton ||
+        (event->button() == Qt::LeftButton && m_spacebarHeld) ||
+        (event->button() == Qt::RightButton && (event->modifiers() & Qt::ShiftModifier))) {
         m_isPanning = true;
         m_lastPanPoint = event->pos();
         setCursor(Qt::ClosedHandCursor);
@@ -1749,6 +1172,33 @@ void MapDisplay::mousePressEvent(QMouseEvent *event)
         if (m_smoothPanTimer->isActive()) {
             m_smoothPanTimer->stop();
         }
+    } else if (event->button() == Qt::LeftButton && m_pointLightPlacementMode) {
+        // Handle point light placement/selection/dragging
+        QPointF scenePos = mapToScene(event->pos());
+
+        // First, check if we clicked on an existing light
+        PointLightSystem* lightSystem = getPointLightSystem();
+        QUuid clickedLightId = lightSystem->lightAtPosition(scenePos);
+
+        if (!clickedLightId.isNull()) {
+            // Clicked on an existing light - select it and prepare for dragging
+            selectLight(clickedLightId);
+            m_isDraggingLight = true;
+            // Calculate offset from light center for smooth dragging
+            const PointLight* light = lightSystem->getLight(clickedLightId);
+            if (light) {
+                m_lightDragOffset = light->position - scenePos;
+            }
+            setCursor(Qt::ClosedHandCursor);
+        } else {
+            // Clicked on empty space - place a new light
+            deselectLight();
+            QUuid newLightId = lightSystem->addLightAtPosition(scenePos, m_currentLightPreset);
+            selectLight(newLightId);
+            qDebug() << "MapDisplay: Added light at" << scenePos << "with preset" << static_cast<int>(m_currentLightPreset);
+        }
+        event->accept();
+        return;
     } else if (event->button() == Qt::LeftButton && (m_currentTool == ToolType::FogBrush || m_currentTool == ToolType::FogRectangle) && m_fogOverlay && m_fogEnabled) {
         QPointF scenePos = mapToScene(event->pos());
         FogToolMode mode = getCurrentFogToolMode();
@@ -1763,21 +1213,17 @@ void MapDisplay::mousePressEvent(QMouseEvent *event)
                 m_currentSelectionRect = QRectF(scenePos, scenePos);
 
                 // Create visual indicator for rectangle selection
-                // THREAD SAFETY: Protect scene modification
-                {
-                    QMutexLocker locker(&s_sceneMutex);
-                    if (m_selectionRectIndicator) {
-                        m_scene->removeItem(m_selectionRectIndicator);
-                        delete m_selectionRectIndicator;
-                    }
-
-                    m_selectionRectIndicator = new QGraphicsRectItem(m_currentSelectionRect);
-                    QPen pen(QColor(255, 255, 0), 2);  // Yellow for reveal
-                    pen.setStyle(Qt::DashLine);
-                    m_selectionRectIndicator->setPen(pen);
-                    m_selectionRectIndicator->setBrush(Qt::NoBrush);
-                    m_scene->addItem(m_selectionRectIndicator);
+                if (m_selectionRectIndicator) {
+                    m_scene->removeItem(m_selectionRectIndicator);
+                    delete m_selectionRectIndicator;
                 }
+
+                m_selectionRectIndicator = new QGraphicsRectItem(m_currentSelectionRect);
+                QPen pen(QColor(255, 255, 0), 2);  // Yellow for reveal
+                pen.setStyle(Qt::DashLine);
+                m_selectionRectIndicator->setPen(pen);
+                m_selectionRectIndicator->setBrush(Qt::NoBrush);
+                m_scene->addItem(m_selectionRectIndicator);
             } else {
                 // Circular fog brush - always reveal (no hide mode)
                 m_fogOverlay->revealAreaFeathered(scenePos, m_fogBrushSize / 2.0);
@@ -1820,6 +1266,18 @@ void MapDisplay::mouseMoveEvent(QMouseEvent *event)
         }
 
         m_lastPanPoint = event->pos();
+    } else if (m_isDraggingLight && !m_selectedPointLightId.isNull()) {
+        // Drag the selected light to new position
+        QPointF scenePos = mapToScene(event->pos());
+        QPointF newPos = scenePos + m_lightDragOffset;
+
+        PointLightSystem* lightSystem = getPointLightSystem();
+        PointLight* light = lightSystem->getLight(m_selectedPointLightId);
+        if (light) {
+            light->position = newPos;
+            lightSystem->updateLight(m_selectedPointLightId, *light);
+            updateSelectionIndicator();
+        }
     } else if (m_isSelectingRectangle && m_selectionRectIndicator) {
         // Update rectangle selection
         QPointF scenePos = mapToScene(event->pos());
@@ -1866,7 +1324,9 @@ void MapDisplay::mouseMoveEvent(QMouseEvent *event)
 
 void MapDisplay::mouseReleaseEvent(QMouseEvent *event)
 {
-    if (event->button() == Qt::MiddleButton ||
+    // Release panning for any button that started it
+    if ((event->button() == Qt::MiddleButton && m_isPanning) ||
+        (event->button() == Qt::RightButton && m_isPanning) ||
         (event->button() == Qt::LeftButton && m_isPanning)) {
         m_isPanning = false;
         updateToolCursor();
@@ -1878,6 +1338,16 @@ void MapDisplay::mouseReleaseEvent(QMouseEvent *event)
         if (m_panVelocity.manhattanLength() > 2.0) {
             m_smoothPanTimer->start();
         }
+    } else if (event->button() == Qt::LeftButton && m_isDraggingLight) {
+        // End light dragging
+        m_isDraggingLight = false;
+        if (m_pointLightPlacementMode) {
+            setCursor(Qt::CrossCursor);
+        } else {
+            updateToolCursor();
+        }
+        event->accept();
+        return;
     } else if (event->button() == Qt::LeftButton && m_isSelectingRectangle && m_fogOverlay) {
         // Complete rectangle selection
         m_isSelectingRectangle = false;
@@ -1893,7 +1363,7 @@ void MapDisplay::mouseReleaseEvent(QMouseEvent *event)
 
         // Clean up selection indicator
         if (m_selectionRectIndicator) {
-            QMutexLocker locker(&s_sceneMutex);  // Thread-safe scene modification
+
             m_scene->removeItem(m_selectionRectIndicator);
             delete m_selectionRectIndicator;
             m_selectionRectIndicator = nullptr;
@@ -1907,30 +1377,32 @@ void MapDisplay::mouseReleaseEvent(QMouseEvent *event)
 
 void MapDisplay::keyPressEvent(QKeyEvent *event)
 {
-    // DEBUG: Log key press events for tool switching
-    if (event->key() >= Qt::Key_1 && event->key() <= Qt::Key_3) {
-        std::cerr << "MapDisplay::keyPressEvent - Key pressed: " << event->key()
-                  << " Modifiers: " << event->modifiers() << std::endl;
-        std::cerr.flush();
+    // CLAUDE.md 3.6: NO number keys for tool switching
+    // Number key handlers removed per CLAUDE.md compliance
+
+    // Spacebar for pan mode (like Photoshop)
+    if (event->key() == Qt::Key_Space && !event->isAutoRepeat()) {
+        m_spacebarHeld = true;
+        setCursor(Qt::OpenHandCursor);
+        return;
     }
 
-    // Handle tool switching first (number keys without modifiers)
-    if (event->modifiers() == Qt::NoModifier) {
-        switch(event->key()) {
-            // NO number key shortcuts per CLAUDE.md
-            case Qt::Key_2:
-                // Legacy handler - no longer used (remove in cleanup)
-                std::cerr.flush();
-                emit toolSwitchRequested(ToolType::FogBrush);
-                return;
-            case Qt::Key_3:
-                // Pointer tool
-                std::cerr << "MapDisplay: Emitting toolSwitchRequested(Pointer)" << std::endl;
-                std::cerr.flush();
-                emit toolSwitchRequested(ToolType::Pointer);
-                return;
-            default:
-                break;
+    // Delete/Backspace to remove selected point light
+    if ((event->key() == Qt::Key_Delete || event->key() == Qt::Key_Backspace) &&
+        !m_selectedPointLightId.isNull()) {
+        PointLightSystem* lightSystem = getPointLightSystem();
+        QUuid lightToRemove = m_selectedPointLightId;
+        deselectLight();
+        lightSystem->removeLight(lightToRemove);
+        qDebug() << "MapDisplay: Deleted light" << lightToRemove;
+        return;
+    }
+
+    // Escape to deselect light or cancel light placement mode
+    if (event->key() == Qt::Key_Escape) {
+        if (!m_selectedPointLightId.isNull()) {
+            deselectLight();
+            return;
         }
     }
 
@@ -1951,10 +1423,7 @@ void MapDisplay::keyPressEvent(QKeyEvent *event)
                 zoomToPreset(m_zoomFactor / 1.2);
                 break;
 
-            case Qt::Key_0:
-                // Fit to screen
-                fitMapToView();
-                break;
+            // Key_0 removed - use '/' for fit-to-screen (CLAUDE.md 3.6)
 
             case Qt::Key_1:
                 // 100% zoom (Ctrl+1)
@@ -1983,28 +1452,7 @@ void MapDisplay::keyPressEvent(QKeyEvent *event)
                 }
                 break;
 
-            case Qt::Key_4:
-                // 50% zoom
-                zoomToPreset(0.5);
-                break;
-
-            case Qt::Key_5:
-                // 25% zoom
-                zoomToPreset(0.25);
-                break;
-
-            case Qt::Key_6:
-                // 150% zoom
-                zoomToPreset(1.5);
-                break;
-
-            case Qt::Key_P:
-                // Toggle nearest portal (P key - D is reserved for Draw tool)
-                if (m_portalsEnabled && m_portalSystem) {
-                    QPointF scenePos = mapToScene(mapFromGlobal(QCursor::pos()));
-                    togglePortalAt(scenePos);
-                }
-                break;
+            // Key_4, Key_5, Key_6 removed - obscure zoom presets (CLAUDE.md UI consistency)
 
             default:
                 handled = false;
@@ -2026,7 +1474,7 @@ void MapDisplay::keyPressEvent(QKeyEvent *event)
             return;
         } else if (event->key() == Qt::Key_BracketRight) {
             // Increase brush size
-            int newSize = qMin(200, m_fogBrushSize + 10);
+            int newSize = qMin(400, m_fogBrushSize + 10);
             setFogBrushSize(newSize);
             showBrushSizeHUD(newSize);
             return;
@@ -2036,13 +1484,24 @@ void MapDisplay::keyPressEvent(QKeyEvent *event)
 
     // Token deletion
     if (event->key() == Qt::Key_Delete || event->key() == Qt::Key_Backspace) {
-        QList<QGraphicsItem*> selectedItems = m_scene->selectedItems();
-        for (QGraphicsItem* item : selectedItems) {
-            // Handle deletion of selected items if needed
-        }
+        // Handle deletion of selected items if needed
     } else {
         QGraphicsView::keyPressEvent(event);
     }
+}
+
+void MapDisplay::keyReleaseEvent(QKeyEvent *event)
+{
+    // Release spacebar pan mode
+    if (event->key() == Qt::Key_Space && !event->isAutoRepeat()) {
+        m_spacebarHeld = false;
+        if (!m_isPanning) {
+            updateToolCursor();  // Restore normal cursor
+        }
+        return;
+    }
+
+    QGraphicsView::keyReleaseEvent(event);
 }
 
 void MapDisplay::animateZoom()
@@ -2312,13 +1771,9 @@ void MapDisplay::createPing(const QPointF& scenePos)
         return;
     }
 
-    // THREAD SAFETY: Protect scene modification
-    {
-        QMutexLocker locker(&s_sceneMutex);
-        PingIndicator* ping = new PingIndicator(scenePos);
-        m_scene->addItem(ping);
-        ping->startAnimation();
-    }
+    PingIndicator* ping = new PingIndicator(scenePos);
+    m_scene->addItem(ping);
+    ping->startAnimation();
 }
 
 void MapDisplay::createGMBeacon(const QPointF& scenePos)
@@ -2327,14 +1782,19 @@ void MapDisplay::createGMBeacon(const QPointF& scenePos)
         return;
     }
 
-    // Calculate viewport width for relative sizing
-    qreal viewportWidth = viewport()->width();
-    // THREAD SAFETY: Protect scene modification
-    {
-        QMutexLocker locker(&s_sceneMutex);
-        GMBeacon* beacon = new GMBeacon(scenePos, viewportWidth);
-        m_scene->addItem(beacon);
+    // Calculate beacon size based on MAP size (not viewport) for consistent scaling
+    // Use the smaller dimension of the map to ensure beacon is visible
+    QRectF sceneRect = m_scene->sceneRect();
+    qreal mapDimension = qMin(sceneRect.width(), sceneRect.height());
+    // Fallback to viewport if no map loaded
+    if (mapDimension <= 0) {
+        mapDimension = viewport()->width();
     }
+
+    GMBeacon* beacon = new GMBeacon(scenePos, mapDimension);
+    beacon->setColor(m_beaconColor);  // Apply selected color BEFORE animation starts
+    m_scene->addItem(beacon);
+    beacon->startAnimation();  // Start animation AFTER color is set
 }
 
 void MapDisplay::mouseDoubleClickEvent(QMouseEvent *event)
@@ -2342,7 +1802,20 @@ void MapDisplay::mouseDoubleClickEvent(QMouseEvent *event)
     if (event->button() == Qt::LeftButton) {
         QPointF scenePos = mapToScene(event->pos());
 
-        // ALWAYS create GM beacon on double-click (global behavior)
+        // In light placement mode, double-click on existing light opens edit dialog
+        if (m_pointLightPlacementMode) {
+            PointLightSystem* lightSystem = getPointLightSystem();
+            if (!lightSystem) return;  // Defensive null-check
+            QUuid clickedLightId = lightSystem->lightAtPosition(scenePos);
+            if (!clickedLightId.isNull()) {
+                // Emit signal to open edit dialog for this light
+                emit pointLightDoubleClicked(clickedLightId);
+                event->accept();
+                return;
+            }
+        }
+
+        // Default: create GM beacon on double-click (global behavior)
         // Simplified UX: Double-click works in ANY mode for player attention
         createGMBeacon(scenePos);
         event->accept();
@@ -2355,18 +1828,93 @@ void MapDisplay::mouseDoubleClickEvent(QMouseEvent *event)
 LightingOverlay* MapDisplay::getLightingOverlay()
 {
     if (!m_lightingOverlay) {
-        // THREAD SAFETY: Protect scene modification
-        QMutexLocker locker(&s_sceneMutex);
-        // Double-check after acquiring lock (double-checked locking pattern)
-        if (!m_lightingOverlay) {
-            m_lightingOverlay = new LightingOverlay();
-            m_scene->addItem(m_lightingOverlay);
-            m_lightingOverlay->setZValue(600);
-            // Keep the default enabled state from LightingOverlay constructor
-            // which is true - this ensures menu state matches actual state
-        }
+        m_lightingOverlay = new LightingOverlay();
+        m_scene->addItem(m_lightingOverlay);
+        m_lightingOverlay->setZValue(ZLayer::LightingOverlay);
+        // Keep the default enabled state from LightingOverlay constructor
+        // which is true - this ensures menu state matches actual state
     }
     return m_lightingOverlay;
+}
+
+// Weather Effects implementation with lazy loading
+WeatherEffect* MapDisplay::getWeatherEffect()
+{
+    if (!m_weatherEffect) {
+        m_weatherEffect = new WeatherEffect();
+        m_scene->addItem(m_weatherEffect);
+        // Z-value already set in WeatherEffect constructor (50.0)
+        // Set scene bounds based on current map
+        if (m_mapItem) {
+            m_weatherEffect->setSceneBounds(m_mapItem->boundingRect());
+        }
+        // Wire to unified animation driver
+        if (m_animationDriver) {
+            connect(m_animationDriver, &SceneAnimationDriver::tick,
+                    m_weatherEffect, &WeatherEffect::advanceAnimation);
+        }
+    }
+    return m_weatherEffect;
+}
+
+// Fog/Mist Effect implementation with lazy loading
+FogMistEffect* MapDisplay::getFogMistEffect()
+{
+    if (!m_fogMistEffect) {
+        m_fogMistEffect = new FogMistEffect();
+        m_scene->addItem(m_fogMistEffect);
+        // Z-value already set in FogMistEffect constructor (40.0)
+        // Set scene bounds based on current map
+        if (m_mapItem) {
+            m_fogMistEffect->setSceneBounds(m_mapItem->boundingRect());
+        }
+        // Wire to unified animation driver
+        if (m_animationDriver) {
+            connect(m_animationDriver, &SceneAnimationDriver::tick,
+                    m_fogMistEffect, &FogMistEffect::advanceAnimation);
+        }
+    }
+    return m_fogMistEffect;
+}
+
+// Lightning Effect implementation with lazy loading
+LightningEffect* MapDisplay::getLightningEffect()
+{
+    if (!m_lightningEffect) {
+        m_lightningEffect = new LightningEffect();
+        m_scene->addItem(m_lightningEffect);
+        // Z-value already set in LightningEffect constructor (70.0)
+        // Set scene bounds based on current map
+        if (m_mapItem) {
+            m_lightningEffect->setSceneBounds(m_mapItem->boundingRect());
+        }
+        // Wire to unified animation driver
+        if (m_animationDriver) {
+            connect(m_animationDriver, &SceneAnimationDriver::tick,
+                    m_lightningEffect, &LightningEffect::advanceAnimation);
+        }
+    }
+    return m_lightningEffect;
+}
+
+// Point Light System implementation with lazy loading
+PointLightSystem* MapDisplay::getPointLightSystem()
+{
+    if (!m_pointLightSystem) {
+        m_pointLightSystem = new PointLightSystem();
+        m_scene->addItem(m_pointLightSystem);
+        // Z-value already set in PointLightSystem constructor (35.0)
+        // Set scene bounds based on current map
+        if (m_mapItem) {
+            m_pointLightSystem->setSceneBounds(m_mapItem->boundingRect());
+        }
+        // Wire to unified animation driver
+        if (m_animationDriver) {
+            connect(m_animationDriver, &SceneAnimationDriver::tick,
+                    m_pointLightSystem, &PointLightSystem::advanceAnimation);
+        }
+    }
+    return m_pointLightSystem;
 }
 
 // Lighting system implementation
@@ -2409,28 +1957,31 @@ int MapDisplay::getTimeOfDay() const
     return 1; // Default to Day
 }
 
-// Point light management - Feature removed
+// Point light management
 void MapDisplay::setPointLightPlacementMode(bool enabled)
 {
-    Q_UNUSED(enabled);
-    // Point light feature removed
+    m_pointLightPlacementMode = enabled;
+    if (enabled) {
+        setCursor(Qt::CrossCursor);
+    } else {
+        setCursor(Qt::ArrowCursor);
+    }
 }
 
 void MapDisplay::addPointLight(const QPointF& position)
 {
-    Q_UNUSED(position);
-    // Point light feature removed
+    // Add a torch light at the given position by default
+    getPointLightSystem()->addLightAtPosition(position, LightPreset::Torch);
 }
 
 void MapDisplay::removePointLight(const QUuid& lightId)
 {
-    Q_UNUSED(lightId);
-    // Point light feature removed
+    getPointLightSystem()->removeLight(lightId);
 }
 
 void MapDisplay::clearAllPointLights()
 {
-    // Point light feature removed
+    getPointLightSystem()->removeAllLights();
 }
 
 void MapDisplay::setAmbientLightLevel(qreal level)
@@ -2467,109 +2018,27 @@ void MapDisplay::updateFogBrushCursor()
 }
 
 
-// OpenGL integration methods
-void MapDisplay::setOpenGLRenderingEnabled(bool enabled)
-{
-    if (m_openglRenderingEnabled == enabled) {
-        return;
-    }
-
-    m_openglRenderingEnabled = enabled;
-
-    if (enabled) {
-        // Create OpenGL display if it doesn't exist
-        if (!m_openglDisplay) {
-            m_openglDisplay = new OpenGLMapDisplay(this);
-
-            // Position the OpenGL widget to overlay the graphics view
-            m_openglDisplay->resize(size());
-            m_openglDisplay->move(0, 0);
-            
-            // CRITICAL FIX: Set proper stacking order - OpenGL should be background layer
-            m_openglDisplay->lower(); // Move to back
-            
-            // Make OpenGL widget semi-transparent to allow Qt content to show through
-            m_openglDisplay->setAttribute(Qt::WA_AlwaysStackOnTop, false);
-            m_openglDisplay->setAttribute(Qt::WA_OpaquePaintEvent, false);
-
-            // Load current map into OpenGL display if available
-            if (!m_currentMap.isNull()) {
-                m_openglDisplay->loadTexture(m_currentMap);
-            }
-
-            // Sync lighting state
-            if (m_lightingOverlay) {
-                m_openglDisplay->setLightingEnabled(isLightingEnabled());
-                m_openglDisplay->setTimeOfDay(getTimeOfDay());
-                m_openglDisplay->setAmbientLightLevel(getAmbientLightLevel());
-            }
-        }
-
-        // CRITICAL FIX: Always show Qt Graphics View content first, OpenGL as enhancement
-        // Don't hide the Qt content when OpenGL is enabled
-        if (!m_currentMap.isNull()) {
-            m_openglDisplay->show();
-            m_openglDisplay->lower(); // Keep in background
-        } else {
-            m_openglDisplay->hide();
-        }
-
-        DebugConsole::system("OpenGL rendering enabled for MapDisplay", "OpenGL");
-    } else {
-        // Hide OpenGL display, fall back to QPainter
-        if (m_openglDisplay) {
-            m_openglDisplay->hide();
-        }
-
-        DebugConsole::warning("OpenGL rendering disabled, using QPainter fallback", "OpenGL");
-    }
-
-    update();
-}
-
-void MapDisplay::forceOpenGLRefresh()
-{
-    // CRITICAL FIX: Force complete OpenGL refresh to recover from black screen
-    if (!m_openglRenderingEnabled || !m_openglDisplay) {
-        return;
-    }
-
-    // Reload texture if we have a current map
-    if (!m_currentMap.isNull()) {
-        m_openglDisplay->loadTexture(m_currentMap);
-        m_openglDisplay->update();
-    }
-
-    // Ensure OpenGL widget is visible and properly positioned
-    m_openglDisplay->resize(size());
-    m_openglDisplay->move(0, 0);
-    m_openglDisplay->show();
-    m_openglDisplay->lower(); // Keep in background
-
-    DebugConsole::info("Forced OpenGL refresh to recover from display issue", "OpenGL");
-}
-
-// Weather effects - Feature removed
+// Weather control stubs (actual weather via lazy-loaded getWeatherEffect())
 void MapDisplay::setWeatherType(int weatherType)
 {
     Q_UNUSED(weatherType);
-    // Weather feature removed
+    // Stub - use getWeatherEffect() for actual weather control
 }
 
 int MapDisplay::getWeatherType() const
 {
-    return 0; // None - weather removed
+    return 0; // Default - see getWeatherEffect() for actual control
 }
 
 void MapDisplay::setWeatherIntensity(float intensity)
 {
     Q_UNUSED(intensity);
-    // Weather feature removed
+    // Stub - use getWeatherEffect() for actual weather control
 }
 
 float MapDisplay::getWeatherIntensity() const
 {
-    return 0.5f; // Default - weather removed
+    return 0.5f; // Default - see getWeatherEffect() for actual control
 }
 
 void MapDisplay::setWindDirection(float x, float y)
@@ -2583,188 +2052,6 @@ void MapDisplay::setWindStrength(float strength)
 {
     Q_UNUSED(strength);
     // Weather feature removed
-}
-
-// Post-processing effects delegation methods
-void MapDisplay::setBloomEnabled(bool enabled)
-{
-    if (m_openglDisplay) {
-        m_openglDisplay->setBloomEnabled(enabled);
-    }
-}
-
-void MapDisplay::setBloomThreshold(float threshold)
-{
-    if (m_openglDisplay) {
-        m_openglDisplay->setBloomThreshold(threshold);
-    }
-}
-
-void MapDisplay::setBloomIntensity(float intensity)
-{
-    if (m_openglDisplay) {
-        m_openglDisplay->setBloomIntensity(intensity);
-    }
-}
-
-void MapDisplay::setBloomRadius(float radius)
-{
-    if (m_openglDisplay) {
-        m_openglDisplay->setBloomRadius(radius);
-    }
-}
-
-void MapDisplay::setShadowMappingEnabled(bool enabled)
-{
-    if (m_openglDisplay) {
-        m_openglDisplay->setShadowMappingEnabled(enabled);
-    }
-}
-
-void MapDisplay::setShadowMapSize(int size)
-{
-    if (m_openglDisplay) {
-        m_openglDisplay->setShadowMapSize(size);
-    }
-}
-
-void MapDisplay::setVolumetricLightingEnabled(bool enabled)
-{
-    if (m_openglDisplay) {
-        m_openglDisplay->setVolumetricLightingEnabled(enabled);
-    }
-}
-
-void MapDisplay::setVolumetricIntensity(float intensity)
-{
-    if (m_openglDisplay) {
-        m_openglDisplay->setVolumetricIntensity(intensity);
-    }
-}
-
-void MapDisplay::setLightShaftsEnabled(bool enabled)
-{
-    if (m_openglDisplay) {
-        m_openglDisplay->setLightShaftsEnabled(enabled);
-    }
-}
-
-void MapDisplay::setLightShaftsIntensity(float intensity)
-{
-    if (m_openglDisplay) {
-        m_openglDisplay->setLightShaftsIntensity(intensity);
-    }
-}
-
-void MapDisplay::setMSAAEnabled(bool enabled)
-{
-    if (m_openglDisplay) {
-        m_openglDisplay->setMSAAEnabled(enabled);
-    }
-}
-
-void MapDisplay::setMSAASamples(int samples)
-{
-    if (m_openglDisplay) {
-        m_openglDisplay->setMSAASamples(samples);
-    }
-}
-
-// Post-processing getters delegation methods
-bool MapDisplay::isBloomEnabled() const
-{
-    if (m_openglDisplay) {
-        return m_openglDisplay->isBloomEnabled();
-    }
-    return false;
-}
-
-bool MapDisplay::isShadowMappingEnabled() const
-{
-    if (m_openglDisplay) {
-        return m_openglDisplay->isShadowMappingEnabled();
-    }
-    return false;
-}
-
-bool MapDisplay::isVolumetricLightingEnabled() const
-{
-    if (m_openglDisplay) {
-        return m_openglDisplay->isVolumetricLightingEnabled();
-    }
-    return false;
-}
-
-bool MapDisplay::isLightShaftsEnabled() const
-{
-    if (m_openglDisplay) {
-        return m_openglDisplay->isLightShaftsEnabled();
-    }
-    return false;
-}
-
-bool MapDisplay::isMSAAEnabled() const
-{
-    if (m_openglDisplay) {
-        return m_openglDisplay->isMSAAEnabled();
-    }
-    return false;
-}
-
-float MapDisplay::getBloomThreshold() const
-{
-    if (m_openglDisplay) {
-        return m_openglDisplay->getBloomThreshold();
-    }
-    return 0.8f;
-}
-
-float MapDisplay::getBloomIntensity() const
-{
-    if (m_openglDisplay) {
-        return m_openglDisplay->getBloomIntensity();
-    }
-    return 1.0f;
-}
-
-float MapDisplay::getBloomRadius() const
-{
-    if (m_openglDisplay) {
-        return m_openglDisplay->getBloomRadius();
-    }
-    return 1.0f;
-}
-
-int MapDisplay::getShadowMapSize() const
-{
-    if (m_openglDisplay) {
-        return m_openglDisplay->getShadowMapSize();
-    }
-    return 2048;
-}
-
-float MapDisplay::getVolumetricIntensity() const
-{
-    if (m_openglDisplay) {
-        return m_openglDisplay->getVolumetricIntensity();
-    }
-    return 0.5f;
-}
-
-float MapDisplay::getLightShaftsIntensity() const
-{
-    if (m_openglDisplay) {
-        return m_openglDisplay->getLightShaftsIntensity();
-    }
-    return 0.5f;
-}
-
-int MapDisplay::getMSAASamples() const
-{
-    if (m_openglDisplay) {
-        return m_openglDisplay->getMSAASamples();
-    }
-    return 4;
 }
 
 void MapDisplay::setActiveTool(ToolType tool, bool isDragging)
@@ -2919,7 +2206,6 @@ void MapDisplay::showBrushSizeHUD(int size)
     QRect viewportRect = viewport()->rect();
     m_brushSizeHUD->adjustSize();
     int hudWidth = m_brushSizeHUD->width();
-    int hudHeight = m_brushSizeHUD->height();
 
     int x = (viewportRect.width() - hudWidth) / 2;
     int y = 40; // 40px from top
@@ -2941,4 +2227,87 @@ void MapDisplay::hideBrushSizeHUD()
         // Use smooth fade-out animation
         AnimationHelper::fadeOut(m_brushSizeHUD, AnimationHelper::FADE_DURATION);
     }
+}
+
+// ============================================================================
+// Point Light Selection and Manipulation
+// ============================================================================
+
+void MapDisplay::selectLight(const QUuid& lightId)
+{
+    if (lightId == m_selectedPointLightId) {
+        return; // Already selected
+    }
+
+    m_selectedPointLightId = lightId;
+    updateSelectionIndicator();
+
+    qDebug() << "MapDisplay: Selected light" << lightId;
+    emit pointLightDoubleClicked(lightId); // Reuse signal for property editing
+}
+
+void MapDisplay::deselectLight()
+{
+    if (m_selectedPointLightId.isNull()) {
+        return; // Nothing to deselect
+    }
+
+    m_selectedPointLightId = QUuid();
+
+    // Remove selection indicator
+    if (m_selectedPointLightIndicator) {
+
+        m_scene->removeItem(m_selectedPointLightIndicator);
+        delete m_selectedPointLightIndicator;
+        m_selectedPointLightIndicator = nullptr;
+    }
+
+    qDebug() << "MapDisplay: Deselected light";
+}
+
+void MapDisplay::updateSelectionIndicator()
+{
+    // Remove existing indicator
+    if (m_selectedPointLightIndicator) {
+
+        m_scene->removeItem(m_selectedPointLightIndicator);
+        delete m_selectedPointLightIndicator;
+        m_selectedPointLightIndicator = nullptr;
+    }
+
+    // Create new indicator if we have a selected light
+    if (!m_selectedPointLightId.isNull()) {
+        PointLightSystem* lightSystem = getPointLightSystem();
+        const PointLight* light = lightSystem->getLight(m_selectedPointLightId);
+
+        if (light) {
+
+
+            // Create a ring indicator around the light
+            qreal radius = light->radius * 0.3; // Selection ring at 30% of light radius
+            if (radius < 20) radius = 20; // Minimum visible size
+
+            m_selectedPointLightIndicator = new QGraphicsEllipseItem(
+                light->position.x() - radius,
+                light->position.y() - radius,
+                radius * 2,
+                radius * 2
+            );
+
+            // Style: cyan dashed ring
+            QPen pen(QColor(0, 200, 255), 3);
+            pen.setStyle(Qt::DashLine);
+            m_selectedPointLightIndicator->setPen(pen);
+            m_selectedPointLightIndicator->setBrush(Qt::NoBrush);
+            m_selectedPointLightIndicator->setZValue(ZLayer::ToolPreview);
+
+            m_scene->addItem(m_selectedPointLightIndicator);
+        }
+    }
+}
+
+void MapDisplay::setCurrentLightPreset(LightPreset preset)
+{
+    m_currentLightPreset = preset;
+    qDebug() << "MapDisplay: Current light preset set to" << static_cast<int>(preset);
 }

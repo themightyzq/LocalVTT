@@ -17,17 +17,22 @@ GridOverlay::GridOverlay()
     if (QApplication::primaryScreen()) {
         m_pixelsPerInch = QApplication::primaryScreen()->logicalDotsPerInch();
     }
+
+    // Initialize cached pen
+    rebuildPen();
 }
 
 void GridOverlay::setMapSize(const QSize& size)
 {
     m_mapSize = size;
+    m_cacheValid = false;
     prepareGeometryChange();
 }
 
 void GridOverlay::setGridSize(int size)
 {
-    m_gridSize = size;
+    m_gridSize = qBound(20, size, 500);
+    m_cacheValid = false;
     // Recalculate scale when grid size changes
     update();
 }
@@ -35,12 +40,15 @@ void GridOverlay::setGridSize(int size)
 void GridOverlay::setGridColor(const QColor& color)
 {
     m_gridColor = color;
+    rebuildPen();
+    m_cacheValid = false;
     update();
 }
 
 void GridOverlay::setGridOpacity(qreal opacity)
 {
     m_gridOpacity = opacity;
+    m_cacheValid = false;
     update();
 }
 
@@ -59,15 +67,14 @@ void GridOverlay::paint(QPainter *painter, const QStyleOptionGraphicsItem *optio
         return;
     }
 
-    // Set up pen for grid lines
-    QPen pen(m_gridColor);
-    pen.setWidth(1);
-    pen.setCosmetic(true);  // Keep line width constant regardless of zoom
-    painter->setPen(pen);
-    painter->setOpacity(m_gridOpacity);
+    if (!m_cacheValid) {
+        rebuildCache();
+    }
+    if (m_cachedGrid.isNull()) {
+        return;
+    }
 
-    // Draw square grid
-    paintSquareGrid(painter);
+    painter->drawPixmap(0, 0, m_cachedGrid);
 }
 
 void GridOverlay::setFeetPerSquare(double feet)
@@ -95,22 +102,41 @@ QString GridOverlay::getGridInfo() const
     return QString("%1 Grid: %2px = %3 ft (%4\" on screen @ %5 DPI)")
            .arg(gridTypeName)
            .arg(m_gridSize)
-           .arg(m_feetPerSquare, 0, 'f', 1)
-           .arg(scaleInches, 0, 'f', 2)
-           .arg(m_pixelsPerInch, 0, 'f', 0);
+           .arg(m_feetPerSquare, 'f', 1)
+           .arg(scaleInches, 'f', 2)
+           .arg(m_pixelsPerInch, 'f', 0);
 }
 
-void GridOverlay::paintSquareGrid(QPainter* painter)
+void GridOverlay::rebuildCache()
 {
-    // Draw vertical lines
-    for (int x = 0; x <= m_mapSize.width(); x += m_gridSize) {
-        painter->drawLine(x, 0, x, m_mapSize.height());
+    if (m_mapSize.isEmpty() || m_gridSize <= 0) {
+        m_cacheValid = false;
+        return;
     }
 
-    // Draw horizontal lines
-    for (int y = 0; y <= m_mapSize.height(); y += m_gridSize) {
-        painter->drawLine(0, y, m_mapSize.width(), y);
+    m_cachedGrid = QPixmap(m_mapSize);
+    m_cachedGrid.fill(Qt::transparent);
+
+    QPainter cachePainter(&m_cachedGrid);
+    cachePainter.setPen(m_gridPen);
+    cachePainter.setOpacity(m_gridOpacity);
+
+    // Batch all lines into a single drawLines call
+    int cols = m_mapSize.width() / m_gridSize + 1;
+    int rows = m_mapSize.height() / m_gridSize + 1;
+
+    QVector<QLineF> lines;
+    lines.reserve(cols + rows);
+
+    for (int x = 0; x <= m_mapSize.width(); x += m_gridSize) {
+        lines.append(QLineF(x, 0, x, m_mapSize.height()));
     }
+    for (int y = 0; y <= m_mapSize.height(); y += m_gridSize) {
+        lines.append(QLineF(0, y, m_mapSize.width(), y));
+    }
+
+    cachePainter.drawLines(lines);
+    m_cacheValid = true;
 }
 
 int GridOverlay::calculateDnDGridSize(double screenDpi)
@@ -129,4 +155,11 @@ int GridOverlay::calculateDnDGridSize(double screenDpi)
     }
 
     return idealSize;
+}
+
+void GridOverlay::rebuildPen()
+{
+    m_gridPen = QPen(m_gridColor);
+    m_gridPen.setWidth(1);
+    m_gridPen.setCosmetic(true);  // Keep line width constant regardless of zoom
 }

@@ -56,7 +56,6 @@ signals:
     void gmBeaconRequested(const QPointF& scenePos);
     void pointLightRequested(const QPointF& scenePos);
     void pointLightDoubleClicked(const QUuid& lightId);
-    void portalToggleRequested(const QPointF& scenePos);
 
 public:
     bool isZoomControlsEnabled() const { return true; }

@@ -31,7 +31,7 @@ QPropertyAnimation* AnimationHelper::fadeIn(QWidget* widget, int duration,
         QObject::connect(anim, &QPropertyAnimation::finished, onFinished);
     }
 
-    QObject::connect(anim, &QPropertyAnimation::finished, [widget, effect]() {
+    QObject::connect(anim, &QPropertyAnimation::finished, [widget]() {
         if (widget) {
             widget->setGraphicsEffect(nullptr);
         }
@@ -585,7 +585,7 @@ void AnimationHelper::setupButtonHoverAnimation(QAbstractButton* button,
     QString originalStyle = button->styleSheet();
 
     // Connect hover events
-    button->installEventFilter(new QObject());
+    button->installEventFilter(new QObject(button));
 
     QObject::connect(button, &QAbstractButton::pressed, [button]() {
         scaleButton(button, 0.95, 100);

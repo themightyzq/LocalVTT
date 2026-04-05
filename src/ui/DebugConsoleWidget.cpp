@@ -317,7 +317,7 @@ void DebugConsoleWidget::updateSystemInfoDisplay()
 #ifdef QT_DEBUG
     buildItem->setText(0, QString("Build Timestamp: %1").arg(BUILD_TIMESTAMP));
 #else
-    buildItem->setText(0, QString("Build Version: 0.15.0-alpha"));
+    buildItem->setText(0, QString("Build Version: %1").arg(APP_VERSION));
 #endif
     buildItem->setForeground(0, QBrush(QColor("#4A90E2")));  // Highlight build info
 

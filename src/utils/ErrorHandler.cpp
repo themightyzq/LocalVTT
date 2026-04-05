@@ -8,7 +8,11 @@
 #include <QGlobalStatic>
 
 // Use Q_GLOBAL_STATIC for thread-safe, lazy initialization without recursion issues
+QT_WARNING_PUSH
+QT_WARNING_DISABLE_CLANG("-Wvariadic-macro-arguments-omitted")
+QT_WARNING_DISABLE_GCC("-Wvariadic-macro-arguments-omitted")
 Q_GLOBAL_STATIC(ErrorHandler, g_errorHandlerInstance)
+QT_WARNING_POP
 
 ErrorHandler& ErrorHandler::instance()
 {
@@ -56,8 +60,8 @@ void ErrorHandler::reportErrorWithRecovery(const QString& message,
         try {
             recoveryAction();
             reportError("Recovery attempted for: " + message, ErrorLevel::Info);
-        } catch (...) {
-            reportError("Recovery failed for: " + message, ErrorLevel::Critical);
+        } catch (const std::exception& e) {
+            reportError(QString("Recovery failed for: %1 (%2)").arg(message, e.what()), ErrorLevel::Critical);
         }
     }
 }

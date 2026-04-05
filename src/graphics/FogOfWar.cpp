@@ -1,20 +1,14 @@
 #include "graphics/FogOfWar.h"
-#include "graphics/WallSystem.h"
-#include "utils/SecureWindowRegistry.h"
 #include <QPainter>
 #include <QBrush>
 #include <QDataStream>
 #include <QBuffer>
 #include <QTimer>
 #include <QWidget>
-#include <QPainterPath>
-#include <QPolygonF>
-#include <QMutexLocker>
 
 FogOfWar::FogOfWar()
     : m_fogColor(0, 0, 0, 255)  // CRITICAL: Specify full opacity for fog color
     , m_fogOpacity(0.8)
-    , m_wallSystem(nullptr)
     , m_gmOpacity(0.3)
     , m_playerViewModeOverride(false)
     , m_ignoreNextChange(false)
@@ -69,8 +63,6 @@ void FogOfWar::initializeFogMask()
 
 void FogOfWar::revealArea(const QPointF& center, qreal radius)
 {
-    QMutexLocker locker(&m_fogMutex);
-
     if (m_fogMask.isNull()) {
         return;
     }
@@ -83,9 +75,6 @@ void FogOfWar::revealArea(const QPointF& center, qreal radius)
     if (!mapBounds.intersects(brushBounds)) {
         return;
     }
-
-    // Save current state before making changes
-    pushState();
 
     // Direct painting to fog mask for reliability
     QPainter painter(&m_fogMask);
@@ -106,8 +95,6 @@ void FogOfWar::revealArea(const QPointF& center, qreal radius)
 
 void FogOfWar::hideArea(const QPointF& center, qreal radius)
 {
-    QMutexLocker locker(&m_fogMutex);
-
     if (m_fogMask.isNull()) {
         return;
     }
@@ -120,9 +107,6 @@ void FogOfWar::hideArea(const QPointF& center, qreal radius)
     if (!mapBounds.intersects(brushBounds)) {
         return;
     }
-
-    // Save current state before making changes
-    pushState();
 
     // Direct painting to fog mask for reliability
     QPainter painter(&m_fogMask);
@@ -146,8 +130,6 @@ void FogOfWar::hideArea(const QPointF& center, qreal radius)
 
 void FogOfWar::revealRectangle(const QRectF& rect)
 {
-    QMutexLocker locker(&m_fogMutex);
-
     if (m_fogMask.isNull() || rect.isEmpty()) {
         return;
     }
@@ -160,9 +142,6 @@ void FogOfWar::revealRectangle(const QRectF& rect)
     if (clampedRect.isEmpty()) {
         return;
     }
-
-    // Save current state before making changes
-    pushState();
 
     // Direct painting to fog mask for reliability
     QPainter painter(&m_fogMask);
@@ -181,8 +160,6 @@ void FogOfWar::revealRectangle(const QRectF& rect)
 
 void FogOfWar::hideRectangle(const QRectF& rect)
 {
-    QMutexLocker locker(&m_fogMutex);
-
     if (m_fogMask.isNull() || rect.isEmpty()) {
         return;
     }
@@ -195,9 +172,6 @@ void FogOfWar::hideRectangle(const QRectF& rect)
     if (clampedRect.isEmpty()) {
         return;
     }
-
-    // Save current state before making changes
-    pushState();
 
     QPainter painter(&m_fogMask);
     painter.setCompositionMode(QPainter::CompositionMode_SourceOver);
@@ -219,8 +193,6 @@ void FogOfWar::hideRectangle(const QRectF& rect)
 
 void FogOfWar::revealAreaFeathered(const QPointF& center, qreal radius, qreal featherAmount)
 {
-    QMutexLocker locker(&m_fogMutex);
-
     if (m_fogMask.isNull()) {
         return;
     }
@@ -233,8 +205,6 @@ void FogOfWar::revealAreaFeathered(const QPointF& center, qreal radius, qreal fe
     if (!mapBounds.intersects(brushBounds)) {
         return;
     }
-
-    pushState();
 
     // Direct painting to fog mask for reliability
     QPainter painter(&m_fogMask);
@@ -260,8 +230,6 @@ void FogOfWar::revealAreaFeathered(const QPointF& center, qreal radius, qreal fe
 
 void FogOfWar::hideAreaFeathered(const QPointF& center, qreal radius, qreal featherAmount)
 {
-    QMutexLocker locker(&m_fogMutex);
-
     if (m_fogMask.isNull()) {
         return;
     }
@@ -274,8 +242,6 @@ void FogOfWar::hideAreaFeathered(const QPointF& center, qreal radius, qreal feat
     if (!mapBounds.intersects(brushBounds)) {
         return;
     }
-
-    pushState();
 
     // Direct painting to fog mask for reliability
     QPainter painter(&m_fogMask);
@@ -304,8 +270,6 @@ void FogOfWar::hideAreaFeathered(const QPointF& center, qreal radius, qreal feat
 
 void FogOfWar::clearAll()
 {
-    QMutexLocker locker(&m_fogMutex);
-
     if (m_fogMask.isNull()) {
         return;
     }
@@ -323,8 +287,6 @@ void FogOfWar::clearAll()
 
 void FogOfWar::fillAll()
 {
-    QMutexLocker locker(&m_fogMutex);
-
     if (m_fogMask.isNull()) {
         return;
     }
@@ -359,29 +321,22 @@ void FogOfWar::paint(QPainter *painter, const QStyleOptionGraphicsItem *option, 
 {
     Q_UNUSED(option)
 
-    QMutexLocker locker(&m_fogMutex);
-
     if (m_fogMask.isNull()) {
         return;
     }
 
     qreal opacity = 1.0;
 
-    if (widget) {
-        SecureWindowRegistry& registry = SecureWindowRegistry::instance();
-        SecureWindowRegistry::WindowType windowType = registry.getWindowType(widget);
-
-        if (windowType == SecureWindowRegistry::MainWindow && !m_playerViewModeOverride) {
+    if (widget && !m_playerViewModeOverride) {
+        QWidget* window = widget->window();
+        if (window && window->objectName() == "MainWindow") {
             opacity = m_gmOpacity;
-        }
-        else if (windowType == SecureWindowRegistry::PlayerWindow) {
-            opacity = 1.0;
         }
     }
 
     painter->setOpacity(opacity);
 
-    updatePixmapCache();
+    // Use pre-built pixmap cache (converted outside paint in performDeferredUpdate)
     if (m_pixmapCacheValid) {
         painter->drawPixmap(0, 0, m_fogPixmapCache);
     } else {
@@ -391,8 +346,6 @@ void FogOfWar::paint(QPainter *painter, const QStyleOptionGraphicsItem *option, 
 
 QByteArray FogOfWar::saveState() const
 {
-    QMutexLocker locker(&m_fogMutex);
-
     if (m_fogMask.isNull()) {
         return QByteArray();
     }
@@ -420,8 +373,6 @@ QByteArray FogOfWar::saveState() const
 
 bool FogOfWar::loadState(const QByteArray& data)
 {
-    QMutexLocker locker(&m_fogMutex);
-
     if (data.isEmpty()) {
         return false;
     }
@@ -459,6 +410,25 @@ bool FogOfWar::loadState(const QByteArray& data)
     return true;
 }
 
+void FogOfWar::beginStroke()
+{
+    pushState();
+    // Throttle updates during active painting (20fps instead of 60fps)
+    if (m_updateTimer) {
+        m_updateTimer->setInterval(50);
+    }
+}
+
+void FogOfWar::endStroke()
+{
+    // Restore normal update rate
+    if (m_updateTimer) {
+        m_updateTimer->setInterval(16);
+    }
+    // Ensure final state is rendered
+    performDeferredUpdate();
+}
+
 void FogOfWar::pushState()
 {
     if (m_fogMask.isNull()) {
@@ -488,8 +458,6 @@ void FogOfWar::pushState()
 
 void FogOfWar::undo()
 {
-    QMutexLocker locker(&m_fogMutex);
-
     if (!canUndo()) {
         return;
     }
@@ -513,8 +481,6 @@ void FogOfWar::undo()
 
 void FogOfWar::redo()
 {
-    QMutexLocker locker(&m_fogMutex);
-
     if (!canRedo()) {
         return;
     }
@@ -592,6 +558,9 @@ void FogOfWar::performDeferredUpdate()
 
     m_pendingUpdate = false;
 
+    // Convert QImage→QPixmap here (outside paint) to avoid blocking the paint thread
+    updatePixmapCache();
+
     // PRIORITY 4 FIX: Track last dirty region before clearing
     m_lastDirtyRegion = m_dirtyRegion;
 
@@ -610,117 +579,6 @@ void FogOfWar::forceImmediateUpdate()
         m_updateTimer->stop();
         performDeferredUpdate();
     }
-}
-
-void FogOfWar::revealAreaWithWalls(const QPointF& center, qreal radius)
-{
-    QMutexLocker locker(&m_fogMutex);
-
-    if (m_fogMask.isNull()) {
-        return;
-    }
-
-    // If no wall system, do simple reveal directly (don't call revealArea to avoid recursion)
-    if (!m_wallSystem) {
-        // Validate bounds to prevent painting outside map area
-        QRectF mapBounds(0, 0, m_mapSize.width(), m_mapSize.height());
-        QRectF brushBounds(center.x() - radius, center.y() - radius, radius * 2, radius * 2);
-
-        // Skip if completely outside map bounds
-        if (!mapBounds.intersects(brushBounds)) {
-            return;
-        }
-
-        // Save current state before making changes
-        pushState();
-
-        QPainter painter(&m_fogMask);
-        painter.setCompositionMode(QPainter::CompositionMode_Clear);
-        painter.setRenderHint(QPainter::Antialiasing, true);
-        painter.setBrush(Qt::transparent);
-        painter.setPen(Qt::NoPen);
-
-        // Clip painting to map bounds to prevent corruption
-        painter.setClipRect(mapBounds);
-        painter.drawEllipse(center, radius, radius);
-
-        // Track dirty region for optimized repainting
-        QRectF dirtyRect = brushBounds.intersected(mapBounds);
-        addDirtyRect(dirtyRect);
-
-        // Schedule batched update
-        scheduleUpdate();
-        return;
-    }
-
-    // Validate bounds to prevent painting outside map area
-    QRectF mapBounds(0, 0, m_mapSize.width(), m_mapSize.height());
-    QRectF brushBounds(center.x() - radius, center.y() - radius, radius * 2, radius * 2);
-
-    // Skip if completely outside map bounds
-    if (!mapBounds.intersects(brushBounds)) {
-        return;
-    }
-
-    // Save current state before making changes
-    pushState();
-
-    // Get visible area polygon from wall system
-    QList<QPointF> visiblePoints = m_wallSystem->getVisibleArea(center, radius);
-    
-    if (visiblePoints.isEmpty()) {
-        // No visibility data, do simple circle reveal directly
-        QPainter painter(&m_fogMask);
-        painter.setCompositionMode(QPainter::CompositionMode_Clear);
-        painter.setRenderHint(QPainter::Antialiasing, true);
-        painter.setBrush(Qt::transparent);
-        painter.setPen(Qt::NoPen);
-        painter.setClipRect(mapBounds);
-        painter.drawEllipse(center, radius, radius);
-
-        QRectF dirtyRect = brushBounds.intersected(mapBounds);
-        addDirtyRect(dirtyRect);
-        scheduleUpdate();
-        return;
-    }
-
-    // Create polygon from visible points
-    QPolygonF visiblePolygon(visiblePoints);
-    
-    // Create painter path for the visible area
-    QPainterPath visiblePath;
-    visiblePath.addPolygon(visiblePolygon);
-    
-    // Intersect with circle to only reveal within brush radius
-    QPainterPath circlePath;
-    circlePath.addEllipse(center, radius, radius);
-    
-    QPainterPath revealPath = visiblePath.intersected(circlePath);
-
-    // Apply the fog reveal using the wall-constrained path
-    QPainter painter(&m_fogMask);
-    painter.setCompositionMode(QPainter::CompositionMode_Clear);
-    painter.setRenderHint(QPainter::Antialiasing, true);
-    painter.setBrush(Qt::transparent);
-    painter.setPen(Qt::NoPen);
-
-    // Clip painting to map bounds to prevent corruption
-    painter.setClipRect(mapBounds);
-    painter.fillPath(revealPath, Qt::transparent);
-
-    // Track dirty region for optimized repainting
-    QRectF dirtyRect = revealPath.boundingRect().intersected(mapBounds);
-    addDirtyRect(dirtyRect);
-
-    // Schedule batched update
-    scheduleUpdate();
-}
-
-void FogOfWar::revealRectangleWithWalls(const QRectF& rect)
-{
-    // SIMPLIFIED: Just call the regular reveal function
-    // Wall system was causing infinite recursion
-    revealRectangle(rect);
 }
 
 void FogOfWar::invalidatePixmapCache()

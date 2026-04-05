@@ -7,6 +7,8 @@ class MapDisplay;
 class PlayerWindow;
 class QAction;
 class QLabel;
+class QToolBar;
+class QSpinBox;
 
 class ViewZoomController : public QObject
 {
@@ -19,6 +21,8 @@ public:
     void setPlayerWindow(PlayerWindow* playerWindow);
     void setZoomActions(QAction* fitAction, QAction* zoomInAction, QAction* zoomOutAction);
     void setZoomStatusLabel(QLabel* label);
+
+    QSpinBox* createToolbarActions(QToolBar* toolbar);
 
     qreal getCurrentZoom() const;
 

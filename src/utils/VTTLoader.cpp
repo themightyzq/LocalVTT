@@ -127,6 +127,9 @@ VTTLoader::VTTData VTTLoader::loadVTT(const QString& filepath, ProgressCallback 
         const int MAX_WALLS = 10000;
         int wallCount = 0;
 
+        // Pre-allocate for expected wall count (avoids reallocation during append)
+        data.walls.reserve(qMin(static_cast<qsizetype>(MAX_WALLS), wallsArray.size()));
+
         for (const QJsonValue& wallValue : wallsArray) {
             if (wallCount >= MAX_WALLS) {
                 DebugConsole::warning(QString("Too many walls, limiting to %1").arg(MAX_WALLS), "VTT");
@@ -206,6 +209,9 @@ VTTLoader::VTTData VTTLoader::loadVTT(const QString& filepath, ProgressCallback 
 
         const int MAX_PORTALS = 1000;
         int portalCount = 0;
+
+        // Pre-allocate for expected portal count (avoids reallocation during append)
+        data.portals.reserve(qMin(static_cast<qsizetype>(MAX_PORTALS), portalsArray.size()));
 
         for (const QJsonValue& portalValue : portalsArray) {
             if (portalCount >= MAX_PORTALS) {
@@ -758,7 +764,7 @@ QColor VTTLoader::parseHexColor(const QString& hexColor)
         if (!ok) return Qt::white;
         int b = hex.mid(4, 2).toInt(&ok, 16);
         if (!ok) return Qt::white;
-        int a = hex.mid(6, 2).toInt(&ok, 16);
+        hex.mid(6, 2).toInt(&ok, 16);  // Parse alpha for validation
         if (!ok) return Qt::white;
 
         // For ambient light, we only care about RGB, not alpha

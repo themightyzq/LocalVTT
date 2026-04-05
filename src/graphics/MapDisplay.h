@@ -4,31 +4,34 @@
 #include <QGraphicsView>
 #include <QImage>
 #include <QUuid>
-#include <QRecursiveMutex>
-#include <QMutexLocker>
 #include <memory>
 #include "utils/VTTLoader.h"
 #include "utils/ToolType.h"
 
-class OpenGLMapDisplay;
-
 class QGraphicsScene;
 class QGraphicsPixmapItem;
 class QGraphicsRectItem;
+struct SceneContents;
 class GridOverlay;
 class FogOfWar;
-class WallSystem;
-class PortalSystem;
 class PingIndicator;
 class GMBeacon;
 class LightingOverlay;
+class WeatherEffect;
+class FogMistEffect;
+class LightningEffect;
+class PointLightSystem;
 class MainWindow;
 class ZoomIndicator;
 class LoadingProgressWidget;
 class ImageLoader;
+class SceneAnimationDriver;
 
 // Forward declaration for fog tool mode
 enum class FogToolMode;
+
+// Forward declaration for light presets
+enum class LightPreset;
 
 class MapDisplay : public QGraphicsView
 {
@@ -100,6 +103,8 @@ public:
 
     // GM Beacon system
     void createGMBeacon(const QPointF& scenePos);
+    void setBeaconColor(const QColor& color) { m_beaconColor = color; }
+    QColor getBeaconColor() const { return m_beaconColor; }
 
     // Lighting system
     void setLightingEnabled(bool enabled);
@@ -119,21 +124,30 @@ public:
     void setAmbientLightLevel(qreal level);
     qreal getAmbientLightLevel() const;
 
+    // Light preset for placement
+    void setCurrentLightPreset(LightPreset preset);
+    LightPreset getCurrentLightPreset() const { return m_currentLightPreset; }
+
+    // Light selection
+    void selectLight(const QUuid& lightId);
+    void deselectLight();
+    QUuid getSelectedLightId() const { return m_selectedPointLightId; }
+    bool hasSelectedLight() const { return !m_selectedPointLightId.isNull(); }
+
     // Get lighting overlay for property editing
     LightingOverlay* getLightingOverlay();
 
-    // Wall system for line of sight
-    void setWallsEnabled(bool enabled);
-    bool areWallsEnabled() const { return m_wallsEnabled; }
-    void setWallDebugRenderingEnabled(bool enabled);
-    bool isWallDebugRenderingEnabled() const;
-    WallSystem* getWallSystem() const { return m_wallSystem; }
+    // Get weather effect overlay (creates lazily if needed)
+    WeatherEffect* getWeatherEffect();
 
-    // Portal system for doors/windows
-    void setPortalsEnabled(bool enabled);
-    bool arePortalsEnabled() const { return m_portalsEnabled; }
-    void togglePortalAt(const QPointF& scenePos);
-    PortalSystem* getPortalSystem() const { return m_portalSystem; }
+    // Get fog/mist effect overlay (creates lazily if needed)
+    FogMistEffect* getFogMistEffect();
+
+    // Get lightning effect overlay (creates lazily if needed)
+    LightningEffect* getLightningEffect();
+
+    // Get point light system (creates lazily if needed)
+    PointLightSystem* getPointLightSystem();
 
     // Unified fog tool mode system
     void setMainWindow(MainWindow* mainWindow) { m_mainWindow = mainWindow; }
@@ -159,49 +173,13 @@ public slots:
     void updateFogBrushPreview(const QPointF& scenePos, Qt::KeyboardModifiers modifiers = Qt::NoModifier);
     void showFogBrushPreview(bool show);
 
-    // OpenGL rendering mode (experimental)
-    void setOpenGLRenderingEnabled(bool enabled);
-    bool isOpenGLRenderingEnabled() const { return m_openglRenderingEnabled; }
-    OpenGLMapDisplay* getOpenGLDisplay() const { return m_openglDisplay; }
-
-    // CRITICAL FIX: Force OpenGL refresh to recover from black screen
-    void forceOpenGLRefresh();
-
-    // Weather effects (delegates to OpenGL display)
+    // Weather effects
     void setWeatherType(int weatherType);
     int getWeatherType() const;
     void setWeatherIntensity(float intensity);
     float getWeatherIntensity() const;
     void setWindDirection(float x, float y);
     void setWindStrength(float strength);
-
-    // Post-processing effects (delegates to OpenGL display)
-    void setBloomEnabled(bool enabled);
-    void setBloomThreshold(float threshold);
-    void setBloomIntensity(float intensity);
-    void setBloomRadius(float radius);
-    void setShadowMappingEnabled(bool enabled);
-    void setShadowMapSize(int size);
-    void setVolumetricLightingEnabled(bool enabled);
-    void setVolumetricIntensity(float intensity);
-    void setLightShaftsEnabled(bool enabled);
-    void setLightShaftsIntensity(float intensity);
-    void setMSAAEnabled(bool enabled);
-    void setMSAASamples(int samples);
-
-    // Post-processing getters (delegates to OpenGL display)
-    bool isBloomEnabled() const;
-    bool isShadowMappingEnabled() const;
-    bool isVolumetricLightingEnabled() const;
-    bool isLightShaftsEnabled() const;
-    bool isMSAAEnabled() const;
-    float getBloomThreshold() const;
-    float getBloomIntensity() const;
-    float getBloomRadius() const;
-    int getShadowMapSize() const;
-    float getVolumetricIntensity() const;
-    float getLightShaftsIntensity() const;
-    int getMSAASamples() const;
 
 signals:
     void zoomChanged(qreal zoomLevel);
@@ -221,9 +199,11 @@ protected:
     void mouseReleaseEvent(QMouseEvent *event) override;
     void mouseDoubleClickEvent(QMouseEvent *event) override;
     void keyPressEvent(QKeyEvent *event) override;
+    void keyReleaseEvent(QKeyEvent *event) override;
     void paintEvent(QPaintEvent *event) override;
 
 private:
+    void applySceneContents(const SceneContents& contents);
     void updateGrid();
     void updateFog();
     void setInitialZoom();
@@ -233,19 +213,16 @@ private:
     QGraphicsPixmapItem* m_mapItem;
     GridOverlay* m_gridOverlay;
     FogOfWar* m_fogOverlay;
-    WallSystem* m_wallSystem;
-    PortalSystem* m_portalSystem;
 
     QImage m_currentMap;
     bool m_gridEnabled;
     bool m_fogEnabled;
-    bool m_wallsEnabled;
-    bool m_portalsEnabled;
     bool m_ownScene;  // Whether this display owns its scene
     int m_vttGridSize;  // Grid size from VTT data (0 for non-VTT files)
     int m_fogBrushSize;  // Current fog brush size in pixels
     bool m_fogHideModeEnabled;  // Whether fog hide mode is active
     bool m_fogRectangleModeEnabled;  // Whether fog rectangle mode is active
+    QColor m_beaconColor;  // Current beacon color (default: cyan)
 
     // Rectangle selection state
     bool m_isSelectingRectangle;
@@ -255,6 +232,7 @@ private:
 
     // Pan support with momentum
     bool m_isPanning;
+    bool m_spacebarHeld;  // Spacebar for pan mode (like Photoshop)
     QPoint m_lastPanPoint;
 
     // Velocity tracking for momentum
@@ -300,10 +278,29 @@ private:
     // Lighting effects
     LightingOverlay* m_lightingOverlay;
 
+    // Weather effects (QPainter-based particles)
+    WeatherEffect* m_weatherEffect;
+
+    // Fog/mist effect overlay (QPainter-based)
+    FogMistEffect* m_fogMistEffect;
+
+    // Lightning effect overlay (QPainter-based flash)
+    LightningEffect* m_lightningEffect;
+
+    // Point light system (QPainter-based radial gradients)
+    PointLightSystem* m_pointLightSystem;
+
+    // Unified animation driver for all atmosphere effects
+    SceneAnimationDriver* m_animationDriver;
+
     // Point light placement mode
     bool m_pointLightPlacementMode;
+    LightPreset m_currentLightPreset;
     QUuid m_selectedPointLightId;
+    bool m_isDraggingLight;
+    QPointF m_lightDragOffset;
     class QGraphicsEllipseItem* m_selectedPointLightIndicator;
+    void updateSelectionIndicator();  // Update visual ring around selected light
 
     // Reference to main window for tool mode queries
     MainWindow* m_mainWindow;
@@ -317,15 +314,12 @@ private:
     void showBrushSizeHUD(int size);
     void hideBrushSizeHUD();
 
+
+
     // Current tool state for cursor management
     ToolType m_currentTool;
     FogToolMode m_currentFogMode;
     bool m_isDraggingTool;
-
-    // OpenGL rendering support (experimental)
-    // Note: Uses Qt parent-child ownership - no manual deletion needed
-    bool m_openglRenderingEnabled;
-    OpenGLMapDisplay* m_openglDisplay;
 
 private slots:
     void animateZoom();
@@ -342,9 +336,6 @@ private:
     QList<class QGraphicsEllipseItem*> m_lightDebugItems;
     bool m_showParsedLights = false;
     void updateParsedLightOverlays();
-
-    // Thread safety for shared scene access
-    static QRecursiveMutex s_sceneMutex;  // Shared recursive mutex for all MapDisplay instances
 
     // Static flag to track if app is ready for progress events
     static bool s_appReadyForProgress;

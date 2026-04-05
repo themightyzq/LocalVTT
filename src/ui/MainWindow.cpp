@@ -1,17 +1,18 @@
 #include "ui/MainWindow.h"
-#include <iostream>
 #include "graphics/MapDisplay.h"
 #include "utils/ActionRegistry.h"
 #include "utils/AnimationHelper.h"
-#include "utils/SecureWindowRegistry.h"
 #include "ui/PlayerWindow.h"
 #include "graphics/FogOfWar.h"
 #include "graphics/GridOverlay.h"
 #include "utils/SettingsManager.h"
 #include "ui/dialogs/SettingsDialog.h"
+#include "ui/dialogs/LightEditDialog.h"
 #include "ui/ToolboxWidget.h"
 #include "ui/ToastNotification.h"
 #include "ui/LoadingOverlay.h"
+#include "ui/KeyboardShortcutsOverlay.h"
+#include "ui/DarkTheme.h"
 #include "ui/DebugConsoleWidget.h"
 #include "utils/DebugConsole.h"
 #include "utils/ErrorHandler.h"
@@ -23,14 +24,18 @@
 #include "controllers/LightingController.h"
 #include "controllers/ViewZoomController.h"
 #include "controllers/PlayerWindowController.h"
+#include "controllers/AtmosphereController.h"
+#include "controllers/AtmosphereManager.h"
 #include "controllers/ToolManager.h"
 #include "utils/ToolType.h"
 #include "ui/widgets/ToolStatusWidget.h"
+#include "ui/widgets/MapBrowserWidget.h"
+#include "ui/AtmosphereToolboxWidget.h"
 #include "utils/MapSession.h"
 #include "graphics/ToolOverlayWidget.h"
 #include "graphics/LightingOverlay.h"
-#include "graphics/SceneManager.h"
-#include "opengl/OpenGLMapDisplay.h"
+#include "graphics/PointLightSystem.h"
+#include "graphics/GMBeacon.h"
 #include <QMenuBar>
 #include <QToolBar>
 #include <QToolButton>
@@ -41,8 +46,10 @@
 #include <QStatusBar>
 #include <QProgressDialog>
 #include <QDragEnterEvent>
+#include <QCloseEvent>
 #include <QMimeData>
 #include <QApplication>
+#include <QGuiApplication>
 #include <QScreen>
 #include <QFileInfo>
 #include <QFile>
@@ -57,19 +64,17 @@
 #include <QStandardPaths>
 #include <QLabel>
 #include <QHBoxLayout>
-#include <QTimer>
 #include <QDir>
 #include <QKeyEvent>
-#include <QTabWidget>
+#include <QTabBar>
 #include <QVBoxLayout>
 #include <QWidgetAction>
 #include <QMoveEvent>
 #include <QResizeEvent>
+#include <QShowEvent>
 #include <QSlider>
 #include <QSpinBox>
 #include <QButtonGroup>
-#include <QVBoxLayout>
-#include <QLabel>
 #include <QPointer>
 
 // Define static constants
@@ -85,22 +90,31 @@ MainWindow::MainWindow(QWidget *parent)
     , m_menuManager(nullptr)
     , m_fileOperationsManager(nullptr)
     , m_toolManager(nullptr)
-    , m_tabWidget(nullptr)
+    , m_gridController(nullptr)
+    , m_lightingController(nullptr)
+    , m_viewZoomController(nullptr)
+    , m_playerWindowController(nullptr)
+    , m_atmosphereController(nullptr)
+    , m_tabBar(nullptr)
     , m_recentFilesMenu(nullptr)
     , m_helpMenu(nullptr)
+    , m_sendToDisplayMenu(nullptr)
+    , m_zoomToolBar(nullptr)
+    , m_clearRecentAction(nullptr)
+    , m_recentFilesController(nullptr)
+    , m_tabsController(nullptr)
     , m_progressDialog(nullptr)
     , m_loadingOverlay(nullptr)
     , m_dropOverlay(nullptr)
     , m_dropAnimation(nullptr)
-    , m_clearRecentAction(nullptr)
-    , m_recentFilesController(nullptr)
-    , m_gridEnabled(true)
-    , m_fogEnabled(false)
+    , m_fogLocked(false)
+    , m_gridLocked(false)
+    , m_mapRotation(0)
+    , m_playerRotation(0)
+    , m_syncRotationToPlayer(true)  // Default: sync rotation to player
     , m_isDragging(false)
     , m_updatingZoomSpinner(false)
     , m_fogToolMode(FogToolMode::UnifiedFog)
-    , m_fogHideModeEnabled(false)
-    , m_fogRectangleModeEnabled(false)
     , m_playerViewModeEnabled(false)
     , m_statusContainer(nullptr)
     , m_gridStatusLabel(nullptr)
@@ -108,39 +122,37 @@ MainWindow::MainWindow(QWidget *parent)
     , m_playerViewStatusLabel(nullptr)
     , m_zoomStatusLabel(nullptr)
     , m_privacyStatusLabel(nullptr)
-    , m_fogAutosaveController(nullptr)
-    , m_tabsController(nullptr)
-    , m_zoomToolBar(nullptr)
+    , m_rotationStatusLabel(nullptr)
+    , m_toolStatusWidget(nullptr)
     , m_fitToScreenAction(nullptr)
     , m_zoomInAction(nullptr)
     , m_zoomOutAction(nullptr)
     , m_zoomPercentageLabel(nullptr)
     , m_gridSizeSpinner(nullptr)
     , m_gridSizeLabel(nullptr)
+    , m_lockGridAction(nullptr)
     , m_zoomSpinner(nullptr)
+    , m_lockFogAction(nullptr)
     , m_fogBrushSlider(nullptr)
     , m_fogBrushLabel(nullptr)
     , m_gmOpacitySlider(nullptr)
     , m_gmOpacityLabel(nullptr)
-    , m_resetFogAction(nullptr)
-    , m_brushSizeDebounceTimer(nullptr)
-    , m_gridSizeDebounceTimer(nullptr)
-    , m_controlStripDock(nullptr)
-    , m_fogToolButtonGroup(nullptr)
-    , m_revealCircleAction(nullptr)
-    , m_hideCircleAction(nullptr)
-    , m_revealRectangleAction(nullptr)
-    , m_hideRectangleAction(nullptr)
-    , m_revealFeatheredAction(nullptr)
-    , m_hideFeatheredAction(nullptr)
-    , m_drawPenAction(nullptr)
-    , m_drawEraserAction(nullptr)
-    , m_fogToolModeLabel(nullptr)
+    , m_fogToolsController(nullptr)
     , m_undoAction(nullptr)
     , m_redoAction(nullptr)
     , m_toggleGridAction(nullptr)
     , m_playerWindowToggleAction(nullptr)
+    , m_syncViewToPlayersAction(nullptr)
+    , m_resetPlayerAutoFitAction(nullptr)
+    , m_syncRotationToggleAction(nullptr)
+    , m_syncRotationNowAction(nullptr)
+    , m_rotatePlayerViewAction(nullptr)
+    , m_fogHideToggleAction(nullptr)
     , m_fogBrushAction(nullptr)
+    , m_resetFogAction(nullptr)
+    , m_brushSizeDebounceTimer(nullptr)
+    , m_gridSizeDebounceTimer(nullptr)
+    , m_controlStripDock(nullptr)
     , m_lightingAction(nullptr)
     , m_timeOfDayButtonGroup(nullptr)
     , m_dawnAction(nullptr)
@@ -156,88 +168,61 @@ MainWindow::MainWindow(QWidget *parent)
     , m_clearPointLightsAction(nullptr)
     , m_exposureSlider(nullptr)
     , m_exposureLabel(nullptr)
+    , m_fogAutosaveController(nullptr)
     , m_debugConsoleWidget(nullptr)
     , m_debugConsoleAction(nullptr)
-    , m_toolStatusWidget(nullptr)
-    , m_gridController(nullptr)
-    , m_lightingController(nullptr)
-    , m_viewZoomController(nullptr)
-    , m_playerWindowController(nullptr)
-    , m_fogToolsController(nullptr)
+    , m_shortcutsOverlay(nullptr)
+    , m_mapBrowserWidget(nullptr)
+    , m_mapBrowserAction(nullptr)
+    , m_atmosphereToolbox(nullptr)
+    , m_atmosphereToolboxAction(nullptr)
 {
-    std::cerr << "MainWindow constructor starting..." << std::endl;
-    std::cerr << "MainWindow: Member initialization complete" << std::endl;
-    std::cerr.flush();
 
     // CRITICAL: Remove try-catch blocks that hide errors - we need to see what's failing
     // Set initial window properties
-    setWindowTitle("LocalVTT - Initializing...");
+    setWindowTitle("Project VTT");
     resize(1200, 800);
-    std::cerr << "MainWindow: Basic properties set" << std::endl;
+    setMinimumSize(960, 600);
 
     // Initialize ActionRegistry first (many components depend on it)
-    std::cerr << "MainWindow: Creating ActionRegistry..." << std::endl;
     m_actionRegistry = new ActionRegistry(this);
-    if (!m_actionRegistry) {
-        std::cerr << "FATAL: Failed to create ActionRegistry!" << std::endl;
-        abort();  // Force crash with core dump for debugging
-    }
-    std::cerr << "MainWindow: ActionRegistry created successfully" << std::endl;
 
     // Load settings and window geometry
-    std::cerr << "MainWindow: Loading settings..." << std::endl;
     SettingsManager& settings = SettingsManager::instance();
     QRect defaultGeometry(100, 100, 1200, 800);
     QRect savedGeometry = settings.loadWindowGeometry("MainWindow", defaultGeometry);
     setGeometry(savedGeometry);
-    std::cerr << "MainWindow: Settings loaded" << std::endl;
 
     // MEMORY OPTIMIZATION: Defer heavy UI initialization
     // Only create bare minimum UI components initially
-    std::cerr << "MainWindow: Setting up minimal UI..." << std::endl;
     setupMinimalUI();  // Create only essential components
-    std::cerr << "MainWindow: Minimal UI completed" << std::endl;
 
-    std::cerr << "MainWindow: Deferring heavy initialization..." << std::endl;
     // Defer creation of controllers and managers until needed
-    QTimer::singleShot(10, this, [this]() {
-        setupDeferredComponents();
+    QPointer<MainWindow> self = this;
+    QTimer::singleShot(10, this, [self]() {
+        if (self) self->setupDeferredComponents();
     });
 
-    std::cerr << "MainWindow: Setting up core actions..." << std::endl;
     setupActions();
-    std::cerr << "MainWindow: setupActions completed" << std::endl;
 
-    std::cerr << "MainWindow: Creating menus..." << std::endl;
     createMenus();
-    std::cerr << "MainWindow: createMenus completed" << std::endl;
 
     // MEMORY OPTIMIZATION: Defer toolbox and fog controller creation
-    std::cerr << "MainWindow: Deferring toolbox creation" << std::endl;
 
     // Setup fog tool mode system BEFORE creating toolbar (toolbar needs these actions)
-    std::cerr << "MainWindow: Setting up fog tool mode system..." << std::endl;
     setupFogToolModeSystem();
-    std::cerr << "MainWindow: Fog tool mode system setup completed" << std::endl;
 
-    std::cerr << "MainWindow: Creating toolbar..." << std::endl;
     createToolbar();
-    std::cerr << "MainWindow: createToolbar completed" << std::endl;
 
-    std::cerr << "MainWindow: Creating zoom toolbar..." << std::endl;
     createZoomToolbar();
-    std::cerr << "MainWindow: createZoomToolbar completed" << std::endl;
 
-    std::cerr << "MainWindow: Setting up status bar..." << std::endl;
     setupStatusBar();
-    std::cerr << "MainWindow: setupStatusBar completed" << std::endl;
 
     // Initialize controllers that depend on UI components
     // Note: ToolManager and FogToolsController will be created after MapDisplay
     // is created in loadMapFile() to avoid null pointer issues
 
     // MEMORY OPTIMIZATION: Defer controller creation until needed
-    std::cerr << "MainWindow: Deferring controller creation..." << std::endl;
     // Only create essential controllers immediately
     m_recentFilesController = new RecentFilesController(this);
 
@@ -249,14 +234,11 @@ MainWindow::MainWindow(QWidget *parent)
     // m_playerWindowController - created when player window is opened
     // m_fogAutosaveController - created when fog is first enabled
     // m_fogToolsController - created when fog tools are first used
-    std::cerr << "MainWindow: Essential controllers created" << std::endl;
 
     // Update UI states
-    std::cerr << "MainWindow: Updating UI states..." << std::endl;
     updateRecentFilesMenu();
     updateUndoRedoButtons();
     updateAllMenuStates();
-    std::cerr << "MainWindow: UI states updated" << std::endl;
 
     // Connect to ErrorHandler for auto-blackout on critical errors
     connect(&ErrorHandler::instance(), &ErrorHandler::errorOccurred,
@@ -271,33 +253,27 @@ MainWindow::MainWindow(QWidget *parent)
     // Final setup
     setObjectName("MainWindow");
 
-    SecureWindowRegistry::instance().registerWindow(this, SecureWindowRegistry::MainWindow);
-
     setAcceptDrops(true);
-    setWindowTitle("LocalVTT - Ready");
-    std::cerr << "MainWindow constructor completed successfully!" << std::endl;
-    std::cerr.flush();
+    setWindowTitle("Project VTT");
 
-    // Add debug to confirm window state
-    std::cerr << "MainWindow isVisible: " << isVisible() << std::endl;
-    std::cerr << "MainWindow geometry: " << geometry().x() << "," << geometry().y()
-              << " " << geometry().width() << "x" << geometry().height() << std::endl;
-    std::cerr.flush();
+    // CRITICAL: Set focus policy so MainWindow can receive keyboard events
+    // This is required for shortcuts to work without clicking inside first
+    setFocusPolicy(Qt::StrongFocus);
 }
 
 MainWindow::~MainWindow()
 {
     // Save window geometry before shutdown
     SettingsManager::instance().saveWindowGeometry("MainWindow", geometry());
-    
+
     // Clean shutdown - stop animations first
     if (m_dropAnimation) {
         m_dropAnimation->stop();
         delete m_dropAnimation;
     }
-    
+
     // TabsController owns sessions; nothing to do here.
-    
+
     if (m_playerWindow) {
         delete m_playerWindow;
     }
@@ -309,63 +285,81 @@ MainWindow::~MainWindow()
     }
 }
 
+void MainWindow::closeEvent(QCloseEvent *event)
+{
+    // Show confirmation dialog before closing
+    QMessageBox::StandardButton reply = QMessageBox::question(
+        this,
+        "Quit Project VTT?",
+        "Are you sure you want to quit?\n\nAny unsaved fog changes will be lost.",
+        QMessageBox::Yes | QMessageBox::No,
+        QMessageBox::No  // Default to No for safety
+    );
+
+    if (reply != QMessageBox::Yes) {
+        event->ignore();
+        return;
+    }
+
+    // User confirmed - close Player Window and quit
+    if (m_playerWindow) {
+        m_playerWindow->close();
+    }
+
+    // Save window geometry
+    SettingsManager::instance().saveWindowGeometry("MainWindow", geometry());
+
+    // Accept the close event and quit the application
+    event->accept();
+    QApplication::quit();
+}
+
 void MainWindow::setupMinimalUI()
 {
     // CRITICAL FIX: Create MapDisplay and ToolManager eagerly to enable tool switching
-    std::cerr << "setupMinimalUI: Creating essential components with MapDisplay..." << std::endl;
-    std::cerr.flush();
 
     // CRITICAL: Remove try-catch blocks to see actual errors
     // Create central widget with tab system
     QWidget* centralWidget = new QWidget(this);
-    if (!centralWidget) {
-        std::cerr << "FATAL: Failed to create central widget!" << std::endl;
-        abort();
-    }
-
     QVBoxLayout* layout = new QVBoxLayout(centralWidget);
-    if (!layout) {
-        std::cerr << "FATAL: Failed to create layout!" << std::endl;
-        abort();
-    }
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(0);
 
     // CRITICAL FIX: Create MapDisplay and tab widget eagerly
     // This ensures tool switching works immediately, even without a loaded map
-    std::cerr << "setupMinimalUI: Creating MapDisplay eagerly for tool switching..." << std::endl;
 
     // Create MapDisplay immediately
     m_mapDisplay = new MapDisplay(this);
-    if (!m_mapDisplay) {
-        std::cerr << "FATAL: Failed to create MapDisplay!" << std::endl;
-        abort();
-    }
     m_mapDisplay->setMainWindow(this);
 
-    // Create tab widget with MapDisplay
-    m_tabWidget = new QTabWidget(this);
-    if (!m_tabWidget) {
-        std::cerr << "FATAL: Failed to create tab widget!" << std::endl;
-        abort();
-    }
-    m_tabWidget->setTabsClosable(true);
-    m_tabWidget->setMovable(true);
+    // Create tab bar (just the tab buttons, not a full tab widget)
+    // This allows us to have one shared MapDisplay for all tabs
+    m_tabBar = new QTabBar(this);
+    m_tabBar->setTabsClosable(true);
+    m_tabBar->setMovable(true);
+    m_tabBar->setExpanding(false);
+    m_tabBar->setDocumentMode(true);
+    m_tabBar->hide();  // Hide until we have maps
 
-    // Add an initial empty tab
-    m_tabWidget->addTab(m_mapDisplay, "Empty Map");
-    layout->addWidget(m_tabWidget);
+    // Layout: tab bar on top, map display below
+    layout->addWidget(m_tabBar);
+    layout->addWidget(m_mapDisplay, 1);  // stretch factor 1 to fill space
 
-    // Create FogToolsController early (needed for fog tool)
+    // Create controllers early (needed for toolbar creation)
     m_fogToolsController = new FogToolsController(this);
+    m_viewZoomController = new ViewZoomController(this);
+    m_viewZoomController->setMapDisplay(m_mapDisplay);
 
     // Create ToolManager immediately so tool switching is available
-    std::cerr << "setupMinimalUI: Creating ToolManager..." << std::endl;
     m_toolManager = new ToolManager(this, m_mapDisplay, this);
 
     // Connect tool switching signal from MapDisplay to ToolManager
     connect(m_mapDisplay, &MapDisplay::toolSwitchRequested,
             m_toolManager, &ToolManager::setActiveTool);
+
+    // Connect point light edit signal to show properties dialog
+    connect(m_mapDisplay, &MapDisplay::pointLightDoubleClicked,
+            this, &MainWindow::showPointLightProperties);
 
     // Connect tool changed signal to show status messages
     connect(m_toolManager, &ToolManager::toolChanged,
@@ -386,11 +380,8 @@ void MainWindow::setupMinimalUI()
                 }
             });
 
-    std::cerr << "setupMinimalUI: MapDisplay and ToolManager created successfully" << std::endl;
 
     setCentralWidget(centralWidget);
-    std::cerr << "setupUI: Central widget set successfully" << std::endl;
-    std::cerr.flush();
 
     // Skip signal connections and complex initialization for now
     // TODO: Connect zoom signals later
@@ -405,13 +396,10 @@ void MainWindow::setupMinimalUI()
     // No opacity effects or animations - they cause crashes with shared scenes
     m_dropAnimation = nullptr;
 
-    std::cerr << "setupMinimalUI: Minimal UI setup completed successfully" << std::endl;
-    std::cerr.flush();
 }
 
 void MainWindow::setupDeferredComponents()
 {
-    std::cerr << "setupDeferredComponents: Creating deferred components..." << std::endl;
 
     // These components can be created after initial window is shown
     // They're not needed immediately for basic functionality
@@ -423,7 +411,6 @@ void MainWindow::setupDeferredComponents()
     // m_playerWindowController - create when player window is opened
     // m_fogToolsController - create when fog is first enabled
 
-    std::cerr << "setupDeferredComponents: Deferred creation complete" << std::endl;
 }
 
 void MainWindow::setupActions()
@@ -465,25 +452,10 @@ void MainWindow::setupActions()
     if (auto* action = getOrCreateAction("fog_toggle")) connect(action, &QAction::triggered, this, &MainWindow::toggleFogOfWar);
     if (auto* action = getOrCreateAction("fog_clear")) connect(action, &QAction::triggered, this, &MainWindow::clearFogOfWar);
     if (auto* action = getOrCreateAction("fog_reset")) connect(action, &QAction::triggered, this, &MainWindow::resetFogOfWar);
+    if (auto* action = getOrCreateAction("fog_hide_toggle")) connect(action, &QAction::triggered, this, &MainWindow::toggleFogHideMode);
 
-    // SIMPLIFIED per CLAUDE.md: No fog mode actions needed
-    // The unified fog tool uses modifiers:
-    // - Click = reveal
-    // - Alt+Click = hide
-    // - Shift+Drag = rectangle
-    // All actions are set to nullptr to prevent crashes
-    m_revealCircleAction = nullptr;
-    m_hideCircleAction = nullptr;
-    m_revealRectangleAction = nullptr;
-    m_hideRectangleAction = nullptr;
-    m_revealFeatheredAction = nullptr;
-    m_hideFeatheredAction = nullptr;
-    m_drawPenAction = nullptr;
-    m_drawEraserAction = nullptr;
-
-    // Window actions
-    m_playerWindowToggleAction = getOrCreateAction("window_player");
-    if (m_playerWindowToggleAction) connect(m_playerWindowToggleAction, &QAction::triggered, this, &MainWindow::togglePlayerWindow);
+    // Window actions - Player Window action is created in createMenus() with correct 'P' shortcut
+    // (ActionRegistry has Ctrl+W which is wrong per CLAUDE.md 3.6)
 
     // Lighting actions (basic toggle only in simplified set)
     m_lightingAction = getOrCreateAction("lighting_toggle");
@@ -528,7 +500,6 @@ void MainWindow::setupActions()
 QAction* MainWindow::getOrCreateAction(const QString& actionId)
 {
     if (!m_actionRegistry) {
-        std::cerr << "ERROR: ActionRegistry not initialized in getOrCreateAction!" << std::endl;
         return nullptr;
     }
     
@@ -606,8 +577,6 @@ void MainWindow::createMenus()
 
     m_fileMenu->addSeparator();
 
-    m_fileMenu->addSeparator();
-
     QAction* exitAction = new QAction("E&xit", this);
     exitAction->setShortcut(QKeySequence::Quit);
     connect(exitAction, &QAction::triggered, this, &MainWindow::close);
@@ -618,45 +587,94 @@ void MainWindow::createMenus()
     // VIEW MENU - Simplified
     m_viewMenu = menuBar()->addMenu("&View");
 
-    // Grid toggle
+    // Grid toggle - ApplicationShortcut so it works regardless of focus
     QAction* gridToggleAction = new QAction("Toggle &Grid", this);
     gridToggleAction->setShortcut(QKeySequence("G"));
+    gridToggleAction->setShortcutContext(Qt::ApplicationShortcut);
     gridToggleAction->setCheckable(true);
-    gridToggleAction->setChecked(m_gridEnabled);
+    gridToggleAction->setChecked(m_mapDisplay->isGridEnabled());
     connect(gridToggleAction, &QAction::triggered, this, &MainWindow::toggleGrid);
     m_viewMenu->addAction(gridToggleAction);
     m_toggleGridAction = gridToggleAction;
 
-    // Fog toggle
+    // Fog toggle - ApplicationShortcut so it works regardless of focus
     QAction* fogToggleAction = getOrCreateAction("fog_toggle");
     if (fogToggleAction) {
-        fogToggleAction->setChecked(m_fogEnabled);
+        fogToggleAction->setShortcutContext(Qt::ApplicationShortcut);
+        fogToggleAction->setChecked(m_mapDisplay->isFogEnabled());
         m_viewMenu->addAction(fogToggleAction);
     }
 
-    // Rectangle fog tool toggle
+    // Rectangle fog tool toggle - ApplicationShortcut so it works regardless of focus
     QAction* fogRectangleAction = new QAction("&Rectangle Fog Tool", this);
     fogRectangleAction->setShortcut(QKeySequence("R"));
+    fogRectangleAction->setShortcutContext(Qt::ApplicationShortcut);
     fogRectangleAction->setCheckable(true);
-    fogRectangleAction->setChecked(m_fogRectangleModeEnabled);
+    fogRectangleAction->setChecked(m_mapDisplay->isFogRectangleModeEnabled());
     connect(fogRectangleAction, &QAction::triggered, this, &MainWindow::toggleFogRectangleMode);
     m_viewMenu->addAction(fogRectangleAction);
     m_fogRectangleModeAction = fogRectangleAction;
 
     m_viewMenu->addSeparator();
 
-    // Player Window
-    QAction* playerWindowAction = new QAction("&Player Window", this);
-    playerWindowAction->setShortcut(QKeySequence("P"));
-    playerWindowAction->setCheckable(true);
-    connect(playerWindowAction, &QAction::triggered, this, &MainWindow::togglePlayerWindow);
-    m_viewMenu->addAction(playerWindowAction);
+    // Player Window - store in member for reuse in toolbar
+    // ApplicationShortcut so it works regardless of focus
+    m_playerWindowToggleAction = new QAction("&Player Window", this);
+    m_playerWindowToggleAction->setShortcut(QKeySequence("P"));
+    m_playerWindowToggleAction->setShortcutContext(Qt::ApplicationShortcut);
+    m_playerWindowToggleAction->setCheckable(true);
+    connect(m_playerWindowToggleAction, &QAction::triggered, this, &MainWindow::togglePlayerWindow);
+    m_viewMenu->addAction(m_playerWindowToggleAction);
+
+    // Send to Display submenu - multi-monitor support
+    m_sendToDisplayMenu = m_viewMenu->addMenu("Send Player to &Display");
+    // Menu will be populated dynamically when opened
+    connect(m_sendToDisplayMenu, &QMenu::aboutToShow, this, &MainWindow::updateSendToDisplayMenu);
+
+    // View sync controls - push DM view to players
+    m_syncViewToPlayersAction = new QAction("S&ync View to Players", this);
+    m_syncViewToPlayersAction->setShortcut(QKeySequence("V"));
+    m_syncViewToPlayersAction->setShortcutContext(Qt::ApplicationShortcut);
+    m_syncViewToPlayersAction->setToolTip("Push your current view to the Player Window (V)");
+    connect(m_syncViewToPlayersAction, &QAction::triggered, this, &MainWindow::syncViewToPlayers);
+    m_viewMenu->addAction(m_syncViewToPlayersAction);
+
+    m_resetPlayerAutoFitAction = new QAction("Reset Player &Auto-Fit", this);
+    m_resetPlayerAutoFitAction->setShortcut(QKeySequence("Shift+V"));
+    m_resetPlayerAutoFitAction->setShortcutContext(Qt::ApplicationShortcut);
+    m_resetPlayerAutoFitAction->setToolTip("Return Player Window to auto-fit mode (Shift+V)");
+    connect(m_resetPlayerAutoFitAction, &QAction::triggered, this, &MainWindow::resetPlayerAutoFit);
+    m_viewMenu->addAction(m_resetPlayerAutoFitAction);
+
+    // Rotation sync controls
+    m_syncRotationToggleAction = new QAction("Sync &Rotation to Players", this);
+    m_syncRotationToggleAction->setCheckable(true);
+    m_syncRotationToggleAction->setChecked(m_syncRotationToPlayer);
+    m_syncRotationToggleAction->setToolTip("When enabled, DM rotation syncs to Player Window automatically");
+    connect(m_syncRotationToggleAction, &QAction::triggered, this, &MainWindow::toggleRotationSync);
+    m_viewMenu->addAction(m_syncRotationToggleAction);
+
+    m_syncRotationNowAction = new QAction("Push Rotation to Players", this);
+    m_syncRotationNowAction->setShortcut(QKeySequence("Shift+R"));
+    m_syncRotationNowAction->setShortcutContext(Qt::ApplicationShortcut);
+    m_syncRotationNowAction->setToolTip("Manually sync DM rotation to Player Window (Shift+R)");
+    connect(m_syncRotationNowAction, &QAction::triggered, this, &MainWindow::syncRotationToPlayer);
+    m_viewMenu->addAction(m_syncRotationNowAction);
+
+    m_rotatePlayerViewAction = new QAction("Rotate Player View", this);
+    m_rotatePlayerViewAction->setShortcut(QKeySequence("Ctrl+R"));
+    m_rotatePlayerViewAction->setShortcutContext(Qt::ApplicationShortcut);
+    m_rotatePlayerViewAction->setToolTip("Rotate only the Player Window view 90° clockwise (Ctrl+R)");
+    connect(m_rotatePlayerViewAction, &QAction::triggered, this, &MainWindow::rotatePlayerView);
+    m_viewMenu->addAction(m_rotatePlayerViewAction);
 
     m_viewMenu->addSeparator();
 
     // Zoom controls
+    // Fit to Screen - reuse MenuManager's action via m_fitToScreenAction if available,
+    // otherwise create without shortcut (shortcut handled by MenuManager)
     QAction* fitAction = new QAction("&Fit to Screen", this);
-    fitAction->setShortcut(QKeySequence("0"));
+    // No shortcut here - MenuManager sets the authoritative shortcut
     connect(fitAction, &QAction::triggered, this, &MainWindow::fitToScreen);
     m_viewMenu->addAction(fitAction);
 
@@ -669,6 +687,148 @@ void MainWindow::createMenus()
     zoomOutAction->setShortcut(QKeySequence::ZoomOut);
     connect(zoomOutAction, &QAction::triggered, this, &MainWindow::zoomOut);
     m_viewMenu->addAction(zoomOutAction);
+
+    m_viewMenu->addSeparator();
+
+    // Atmosphere submenu - for lighting/weather transitions
+    m_atmosphereController = new AtmosphereController(this);
+    m_atmosphereController->attachToMainWindow(this);
+    if (m_mapDisplay) {
+        m_atmosphereController->setMapDisplay(m_mapDisplay);
+    }
+    QMenu* atmosphereMenu = m_atmosphereController->createAtmosphereMenu(m_viewMenu);
+    m_viewMenu->addMenu(atmosphereMenu);
+
+    m_viewMenu->addSeparator();
+
+    // Fog Controls submenu - for GM opacity and brush size presets
+    QMenu* fogControlsMenu = m_viewMenu->addMenu("Fog &Controls");
+
+    // GM Opacity presets
+    QAction* opacity25Action = new QAction("DM Opacity: &25%", this);
+    connect(opacity25Action, &QAction::triggered, [this]() {
+        if (m_mapDisplay && m_mapDisplay->getFogOverlay()) {
+            m_mapDisplay->getFogOverlay()->setGMOpacity(0.25);
+            if (m_toolboxWidget) m_toolboxWidget->updateGMOpacity(25);
+        }
+    });
+    fogControlsMenu->addAction(opacity25Action);
+
+    QAction* opacity50Action = new QAction("DM Opacity: &50%", this);
+    connect(opacity50Action, &QAction::triggered, [this]() {
+        if (m_mapDisplay && m_mapDisplay->getFogOverlay()) {
+            m_mapDisplay->getFogOverlay()->setGMOpacity(0.50);
+            if (m_toolboxWidget) m_toolboxWidget->updateGMOpacity(50);
+        }
+    });
+    fogControlsMenu->addAction(opacity50Action);
+
+    QAction* opacity75Action = new QAction("DM Opacity: &75%", this);
+    connect(opacity75Action, &QAction::triggered, [this]() {
+        if (m_mapDisplay && m_mapDisplay->getFogOverlay()) {
+            m_mapDisplay->getFogOverlay()->setGMOpacity(0.75);
+            if (m_toolboxWidget) m_toolboxWidget->updateGMOpacity(75);
+        }
+    });
+    fogControlsMenu->addAction(opacity75Action);
+
+    QAction* opacity100Action = new QAction("DM Opacity: &100%", this);
+    connect(opacity100Action, &QAction::triggered, [this]() {
+        if (m_mapDisplay && m_mapDisplay->getFogOverlay()) {
+            m_mapDisplay->getFogOverlay()->setGMOpacity(1.0);
+            if (m_toolboxWidget) m_toolboxWidget->updateGMOpacity(100);
+        }
+    });
+    fogControlsMenu->addAction(opacity100Action);
+
+    fogControlsMenu->addSeparator();
+
+    // Brush Size presets
+    QAction* brushSmallAction = new QAction("Brush Size: &Small (50px)", this);
+    connect(brushSmallAction, &QAction::triggered, [this]() {
+        if (m_mapDisplay) {
+            m_mapDisplay->setFogBrushSize(50);
+            if (m_toolboxWidget) m_toolboxWidget->updateFogBrushSize(50);
+        }
+    });
+    fogControlsMenu->addAction(brushSmallAction);
+
+    QAction* brushMediumAction = new QAction("Brush Size: &Medium (150px)", this);
+    connect(brushMediumAction, &QAction::triggered, [this]() {
+        if (m_mapDisplay) {
+            m_mapDisplay->setFogBrushSize(150);
+            if (m_toolboxWidget) m_toolboxWidget->updateFogBrushSize(150);
+        }
+    });
+    fogControlsMenu->addAction(brushMediumAction);
+
+    QAction* brushLargeAction = new QAction("Brush Size: &Large (300px)", this);
+    connect(brushLargeAction, &QAction::triggered, [this]() {
+        if (m_mapDisplay) {
+            m_mapDisplay->setFogBrushSize(300);
+            if (m_toolboxWidget) m_toolboxWidget->updateFogBrushSize(300);
+        }
+    });
+    fogControlsMenu->addAction(brushLargeAction);
+
+    // Beacon Color submenu - full color palette
+    QMenu* beaconColorMenu = m_viewMenu->addMenu("&Beacon Color");
+    QList<QColor> beaconColors = GMBeacon::presetColors();
+    // Names match GMBeacon::presetColors() order: Red, Blue, Yellow, Green, Orange, Purple, White, Grey, Black
+    QStringList colorNames = {"&Red", "&Blue", "&Yellow", "&Green", "&Orange", "&Purple", "&White", "Gre&y", "Blac&k"};
+
+    for (int i = 0; i < qMin(beaconColors.size(), colorNames.size()); ++i) {
+        QAction* colorAction = new QAction(colorNames[i], this);
+        QColor color = beaconColors[i];
+        connect(colorAction, &QAction::triggered, [this, color]() {
+            if (m_mapDisplay) {
+                m_mapDisplay->setBeaconColor(color);
+            }
+            if (m_toolboxWidget) {
+                m_toolboxWidget->setBeaconColor(color);
+            }
+        });
+        beaconColorMenu->addAction(colorAction);
+    }
+
+    m_viewMenu->addSeparator();
+
+    // Map Browser dock widget
+    m_mapBrowserWidget = new MapBrowserWidget(this);
+    m_mapBrowserWidget->setRecentFilesController(m_recentFilesController);
+    addDockWidget(Qt::RightDockWidgetArea, m_mapBrowserWidget);
+    m_mapBrowserWidget->hide();  // Hidden by default
+
+    // Connect map selection to file loading
+    connect(m_mapBrowserWidget, &MapBrowserWidget::mapSelected,
+            this, &MainWindow::loadMapFile);
+
+    m_mapBrowserAction = new QAction("Map &Browser", this);
+    m_mapBrowserAction->setShortcut(QKeySequence("B"));
+    m_mapBrowserAction->setCheckable(true);
+    m_mapBrowserAction->setChecked(false);
+    connect(m_mapBrowserAction, &QAction::triggered, this, &MainWindow::toggleMapBrowser);
+    m_viewMenu->addAction(m_mapBrowserAction);
+
+    // Atmosphere Toolbox dock widget
+    m_atmosphereToolbox = new AtmosphereToolboxWidget(this);
+    if (m_atmosphereController && m_atmosphereController->getAtmosphereManager()) {
+        m_atmosphereToolbox->setAtmosphereManager(m_atmosphereController->getAtmosphereManager());
+        auto* mgr = m_atmosphereController->getAtmosphereManager();
+        m_atmosphereToolbox->setAudioSystems(mgr->getAmbientPlayer(), mgr->getMusicRemote());
+    }
+    addDockWidget(Qt::RightDockWidgetArea, m_atmosphereToolbox);
+    m_atmosphereToolbox->hide();  // Hidden by default
+
+    // Tabify right-side panels so they share space when both open
+    tabifyDockWidget(m_mapBrowserWidget, m_atmosphereToolbox);
+
+    m_atmosphereToolboxAction = new QAction("&Atmosphere Panel", this);
+    m_atmosphereToolboxAction->setShortcut(QKeySequence("A"));
+    m_atmosphereToolboxAction->setCheckable(true);
+    m_atmosphereToolboxAction->setChecked(false);
+    connect(m_atmosphereToolboxAction, &QAction::triggered, this, &MainWindow::toggleAtmosphereToolbox);
+    m_viewMenu->addAction(m_atmosphereToolboxAction);
 
     // TOOLS MENU - Fog tools (NO keyboard shortcuts per CLAUDE.md)
     QMenu* toolsMenu = menuBar()->addMenu("&Tools");
@@ -725,50 +885,8 @@ void MainWindow::createToolbar()
     m_mainToolBar->setMovable(false);
     m_mainToolBar->setToolButtonStyle(Qt::ToolButtonIconOnly);  // Icons only to save space
 
-    // Premium toolbar styling with subtle gradient and shadows
-    m_mainToolBar->setStyleSheet(R"(
-        QToolBar {
-            background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
-                        stop: 0 #2a2a2a, stop: 1 #242424);
-            border: none;
-            border-bottom: 1px solid #1a1a1a;
-            padding: 6px;
-            spacing: 8px;
-        }
-        QToolBar::separator {
-            background: rgba(255, 255, 255, 0.08);
-            width: 1px;
-            margin: 4px 8px;
-        }
-        QToolButton {
-            background: rgba(255, 255, 255, 0.05);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            border-radius: 6px;
-            padding: 10px;
-            min-width: 36px;
-            min-height: 36px;
-            color: #E0E0E0;
-            font-size: 13px;
-            font-weight: 500;
-        }
-        QToolButton:hover:enabled {
-            background: rgba(74, 144, 226, 0.15);
-            border-color: rgba(74, 144, 226, 0.3);
-        }
-        QToolButton:pressed:enabled {
-            background: rgba(74, 144, 226, 0.25);
-        }
-        QToolButton:checked {
-            background: rgba(74, 144, 226, 0.3);
-            border-color: #4A90E2;
-            color: white;
-        }
-        QToolButton:disabled {
-            background: rgba(255, 255, 255, 0.02);
-            border-color: rgba(255, 255, 255, 0.05);
-            color: rgba(224, 224, 224, 0.3);
-        }
-    )");
+    // Toolbar styling from DarkTheme
+    m_mainToolBar->setStyleSheet(DarkTheme::toolBarStyle() + DarkTheme::toolButtonStyle());
 
     // SECTION 1: File Operations
     // Load Map button with premium styling
@@ -780,172 +898,93 @@ void MainWindow::createToolbar()
 
     m_mainToolBar->addSeparator();
 
-    // SECTION 2: Fog Controls
-    // Fog Mode Toggle (Master switch)
-    QAction* fogModeAction = new QAction(QIcon(":/icons/fog.svg"), "Fog Mode", this);
-    fogModeAction->setCheckable(true);
-    fogModeAction->setChecked(false);  // Default OFF
-    fogModeAction->setToolTip("<b>Fog Mode</b><br>Enable Fog of War<br>Map goes black until revealed<br><i>Shortcut: F</i>");
-    fogModeAction->setShortcut(QKeySequence("F"));
-    connect(fogModeAction, &QAction::toggled, this, &MainWindow::toggleFogOfWar);
-    m_mainToolBar->addAction(fogModeAction);
+    // SECTION 2: Fog Controls (delegated to controller)
+    {
+        QAction* fogToggleAction = getOrCreateAction("fog_toggle");
+        auto fogActions = m_fogToolsController->createToolbarActions(m_mainToolBar, fogToggleAction);
+        m_fogHideToggleAction = fogActions.hideToggle;
+        m_fogBrushAction = fogActions.brushTool;
+        m_fogRectAction = fogActions.rectTool;
+        m_resetFogAction = fogActions.resetFog;
+        m_lockFogAction = fogActions.lockFog;
 
-    // Reveal Brush Tool (disabled initially)
-    m_fogBrushAction = new QAction(QIcon(":/icons/fog_brush.svg"), "Reveal Brush", this);
-    m_fogBrushAction->setCheckable(true);
-    m_fogBrushAction->setEnabled(false);  // Disabled until Fog Mode ON
-    m_fogBrushAction->setToolTip("<b>Reveal Brush</b><br>Circle brush tool<br>Click and drag to reveal areas");
-    connect(m_fogBrushAction, &QAction::triggered, [this]() {
-        if (m_toolManager) {
-            m_toolManager->setActiveTool(ToolType::FogBrush);
-            statusBar()->showMessage("Reveal Brush active - Click/drag to reveal areas", 3000);
-            updateContextualToolbarControls();  // Update contextual controls
-        }
-    });
-    m_mainToolBar->addAction(m_fogBrushAction);
-
-    // Reveal Rectangle Tool (disabled initially)
-    m_fogRectAction = new QAction(QIcon(":/icons/fog_rect.svg"), "Reveal Rectangle", this);
-    m_fogRectAction->setCheckable(true);
-    m_fogRectAction->setEnabled(false);  // Disabled until Fog Mode ON
-    m_fogRectAction->setToolTip("<b>Reveal Rectangle</b><br>Rectangle selection tool<br>Drag to reveal rectangular areas");
-    connect(m_fogRectAction, &QAction::triggered, [this]() {
-        if (m_toolManager) {
-            m_toolManager->setActiveTool(ToolType::FogRectangle);
-            statusBar()->showMessage("Reveal Rectangle active - Drag to reveal rectangular area", 3000);
-            updateContextualToolbarControls();  // Update contextual controls
-        }
-    });
-    m_mainToolBar->addAction(m_fogRectAction);
-
-    // Create fog tool action group for mutual exclusivity
-    QActionGroup* fogToolGroup = new QActionGroup(this);
-    fogToolGroup->setExclusive(true);
-    fogToolGroup->addAction(m_fogBrushAction);
-    fogToolGroup->addAction(m_fogRectAction);
-
-    // Reset Fog Button (in fog section, always visible)
-    m_resetFogAction = new QAction(QIcon(":/icons/reset.svg"), "Reset Fog", this);
-    m_resetFogAction->setToolTip("<b>Reset Fog</b><br>Clear all fog and start over<br><span style='color: #ff6b6b;'>⚠ Requires confirmation</span>");
-    m_resetFogAction->setEnabled(false);  // Disabled until Fog Mode ON
-    connect(m_resetFogAction, &QAction::triggered, this, &MainWindow::resetFogOfWar);
-    m_mainToolBar->addAction(m_resetFogAction);
+        // Wire cross-cutting connections (these reference MainWindow state)
+        connect(m_fogHideToggleAction, &QAction::triggered, this, &MainWindow::toggleFogHideMode);
+        connect(m_fogBrushAction, &QAction::triggered, this, [this]() {
+            if (m_toolManager) {
+                m_toolManager->setActiveTool(ToolType::FogBrush);
+                statusBar()->showMessage("Reveal Brush active - Click/drag to reveal areas", 3000);
+                updateContextualToolbarControls();
+            }
+        });
+        connect(m_fogRectAction, &QAction::triggered, this, [this]() {
+            if (m_toolManager) {
+                m_toolManager->setActiveTool(ToolType::FogRectangle);
+                statusBar()->showMessage("Reveal Rectangle active - Drag to reveal rectangular area", 3000);
+                updateContextualToolbarControls();
+            }
+        });
+        connect(m_resetFogAction, &QAction::triggered, this, &MainWindow::resetFogOfWar);
+        connect(m_lockFogAction, &QAction::triggered, this, &MainWindow::toggleFogLock);
+    }
 
     m_mainToolBar->addSeparator();
 
-    // SECTION 3: Zoom Controls (DM only - incremental zoom buttons)
-    QAction* zoomOutAction = new QAction(QIcon(":/icons/zoom_out.svg"), "Zoom Out", this);
-    zoomOutAction->setToolTip("<b>Zoom Out</b><br><i>Shortcut: -</i>");
-    zoomOutAction->setShortcut(QKeySequence("-"));
-    connect(zoomOutAction, &QAction::triggered, this, &MainWindow::zoomOut);
-    m_mainToolBar->addAction(zoomOutAction);
-
-    QAction* zoomInAction = new QAction(QIcon(":/icons/zoom_in.svg"), "Zoom In", this);
-    zoomInAction->setToolTip("<b>Zoom In</b><br><i>Shortcut: +</i>");
-    zoomInAction->setShortcut(QKeySequence("+"));
-    connect(zoomInAction, &QAction::triggered, this, &MainWindow::zoomIn);
-    m_mainToolBar->addAction(zoomInAction);
-
-    QAction* zoomFitAction = new QAction(QIcon(":/icons/zoom_fit.svg"), "Fit", this);
-    zoomFitAction->setToolTip("<b>Fit to View</b><br>Fit entire map to window<br><i>Shortcut: 0</i>");
-    zoomFitAction->setShortcut(QKeySequence("0"));
-    connect(zoomFitAction, &QAction::triggered, this, &MainWindow::fitMapToView);
-    m_mainToolBar->addAction(zoomFitAction);
-
-    // Zoom level spinner (25-400%)
-    QLabel* zoomLabel = new QLabel("Zoom:", this);
-    zoomLabel->setStyleSheet("color: #E0E0E0; font-size: 12px; font-weight: 500; padding: 0 4px;");
-    m_mainToolBar->addWidget(zoomLabel);
-
-    m_zoomSpinner = new QSpinBox(this);
-    m_zoomSpinner->setMinimum(10);   // Match MIN_ZOOM (0.1 * 100 = 10%)
-    m_zoomSpinner->setMaximum(500);  // Match MAX_ZOOM (5.0 * 100 = 500%)
-    m_zoomSpinner->setValue(100);    // 100% = actual size
-    m_zoomSpinner->setSuffix("%");
-    m_zoomSpinner->setSingleStep(5);  // Smaller increment for precision
-    m_zoomSpinner->setFixedWidth(85);
-    m_zoomSpinner->setToolTip("<b>Zoom Level</b><br>Adjust map zoom percentage<br>Range: 10-500%");
-    m_zoomSpinner->setStyleSheet(R"(
-        QSpinBox {
-            background: rgba(255, 255, 255, 0.05);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            border-radius: 4px;
-            padding: 4px 8px;
-            color: #E0E0E0;
-            font-size: 12px;
-            font-weight: 500;
-        }
-        QSpinBox:hover {
-            background: rgba(255, 255, 255, 0.08);
-            border-color: rgba(74, 144, 226, 0.3);
-        }
-        QSpinBox::up-button, QSpinBox::down-button {
-            background: rgba(255, 255, 255, 0.05);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            width: 16px;
-        }
-        QSpinBox::up-button:hover, QSpinBox::down-button:hover {
-            background: rgba(74, 144, 226, 0.2);
-        }
-        QSpinBox::up-arrow {
-            image: none;
-            border-left: 4px solid transparent;
-            border-right: 4px solid transparent;
-            border-bottom: 4px solid #E0E0E0;
-            width: 0;
-            height: 0;
-        }
-        QSpinBox::down-arrow {
-            image: none;
-            border-left: 4px solid transparent;
-            border-right: 4px solid transparent;
-            border-top: 4px solid #E0E0E0;
-            width: 0;
-            height: 0;
-        }
-    )");
-    m_mainToolBar->addWidget(m_zoomSpinner);
-
-    // Connect zoom spinner to actually change zoom
-    // Use QPointer for safe lambda capture
-    QPointer<QSpinBox> safeZoomSpinner = m_zoomSpinner;
-    connect(m_zoomSpinner, QOverload<int>::of(&QSpinBox::valueChanged), [this, safeZoomSpinner](int value) {
-        // Ignore programmatic updates (from zoom buttons)
-        if (m_updatingZoomSpinner) {
-            return;
-        }
-
-        if (m_mapDisplay && safeZoomSpinner) {
-            qreal zoomFactor = value / 100.0;  // Convert percentage to factor
-            m_mapDisplay->setZoomLevel(zoomFactor);
+    // SECTION 3: Zoom Controls (delegated to controller)
+    m_zoomSpinner = m_viewZoomController->createToolbarActions(m_mainToolBar);
+    connect(m_zoomSpinner, QOverload<int>::of(&QSpinBox::valueChanged), [this](int value) {
+        if (m_updatingZoomSpinner) return;
+        if (m_mapDisplay) {
+            m_mapDisplay->setZoomLevel(value / 100.0);
         }
     });
+
+    QAction* centerAction = new QAction(QIcon(":/icons/center.svg"), "Center", this);
+    centerAction->setToolTip("<b>Center on Map</b><br>Re-center view on map<br>(without changing zoom)");
+    connect(centerAction, &QAction::triggered, this, &MainWindow::centerOnMap);
+    m_mainToolBar->addAction(centerAction);
+
+    QAction* rotateAction = new QAction(QIcon(":/icons/rotate.svg"), "Rotate", this);
+    rotateAction->setToolTip("<b>Rotate Map</b><br>Rotate 90° clockwise");
+    connect(rotateAction, &QAction::triggered, this, &MainWindow::rotateMap);
+    m_mainToolBar->addAction(rotateAction);
 
     m_mainToolBar->addSeparator();
 
     // SECTION 4: Grid Toggle (Simple checkbox)
-    QAction* gridAction = new QAction(QIcon(":/icons/grid.svg"), "Grid", this);
-    gridAction->setCheckable(true);
-    gridAction->setChecked(m_gridEnabled);
-    gridAction->setToolTip("<b>Grid Overlay</b><br>Show/hide grid lines<br><i>Shortcut: G</i>");
-    gridAction->setShortcut(QKeySequence("G"));
-    connect(gridAction, &QAction::triggered, this, &MainWindow::toggleGrid);
-    m_mainToolBar->addAction(gridAction);
-    m_toggleGridAction = gridAction;
+    // Reuse the menu action to avoid duplicate shortcuts
+    if (m_toggleGridAction) {
+        m_toggleGridAction->setIcon(QIcon(":/icons/grid.svg"));
+        m_toggleGridAction->setText("Grid");
+        m_toggleGridAction->setToolTip("<b>Grid Overlay</b><br>Show/hide grid lines<br><i>Shortcut: G</i>");
+        // Shortcut already set in menu at line 623 - don't duplicate
+        m_mainToolBar->addAction(m_toggleGridAction);
+    }
+
+    // Lock Grid Button
+    m_lockGridAction = new QAction(QIcon(":/icons/unlock.svg"), "Lock Grid", this);
+    m_lockGridAction->setToolTip("<b>Grid Unlocked</b><br>Click to lock grid editing");
+    m_lockGridAction->setCheckable(true);
+    m_lockGridAction->setChecked(false);
+    connect(m_lockGridAction, &QAction::triggered, this, &MainWindow::toggleGridLock);
+    m_mainToolBar->addAction(m_lockGridAction);
 
     m_mainToolBar->addSeparator();
 
     // SECTION 5: Player Window (Most Important)
-    QAction* playerWindowAction = new QAction(QIcon(":/icons/player_view.svg"), "Player View", this);
-    playerWindowAction->setCheckable(true);
-    playerWindowAction->setChecked(m_playerWindow != nullptr);
-    playerWindowAction->setToolTip("<b>Player View</b><br>Open TV display window<br>Show map to players<br><i>Shortcut: P</i>");
-    playerWindowAction->setShortcut(QKeySequence("P"));
-    connect(playerWindowAction, &QAction::triggered, this, &MainWindow::togglePlayerWindow);
-    m_mainToolBar->addAction(playerWindowAction);
+    // Reuse the menu action to avoid duplicate shortcuts
+    if (m_playerWindowToggleAction) {
+        m_playerWindowToggleAction->setIcon(QIcon(":/icons/player_view.svg"));
+        m_playerWindowToggleAction->setText("Player View");
+        m_playerWindowToggleAction->setChecked(m_playerWindow != nullptr);
+        m_playerWindowToggleAction->setToolTip("<b>Player View</b><br>Open TV display window<br>Show map to players<br><i>Shortcut: P</i>");
+        // Shortcut already set in menu at line 650 - don't duplicate
+        // Connection already established in menu setup - don't duplicate
+        m_mainToolBar->addAction(m_playerWindowToggleAction);
+    }
 
     // Make player window button more prominent with animation
-    if (auto* btn = qobject_cast<QToolButton*>(m_mainToolBar->widgetForAction(playerWindowAction))) {
+    if (auto* btn = qobject_cast<QToolButton*>(m_mainToolBar->widgetForAction(m_playerWindowToggleAction))) {
         btn->setStyleSheet(R"(
             QToolButton {
                 background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
@@ -972,33 +1011,17 @@ void MainWindow::createToolbar()
             }
         )");
 
-        // Add pulse animation when not connected
-        QTimer* pulseTimer = new QTimer(this);
-        connect(pulseTimer, &QTimer::timeout, [btn, this]() {
-            if (!m_playerWindow) {
-                // Subtle pulse effect to draw attention
-                static bool growing = true;
-                static int pulseStep = 0;
-
-                if (growing) {
-                    pulseStep += 2;
-                    if (pulseStep >= 10) growing = false;
-                } else {
-                    pulseStep -= 2;
-                    if (pulseStep <= 0) growing = true;
-                }
-
-                QString glow = QString("0 0 %1px rgba(74, 144, 226, 0.6)").arg(10 + pulseStep);
-                // Box-shadow not supported in Qt - removed to prevent warnings
-            }
-        });
-        pulseTimer->start(100);
+        // NOTE: Pulse animation removed - Qt QSS doesn't support box-shadow
+        // and the effect was non-functional. Keep button styling simple.
     }
-    m_playerWindowToggleAction = playerWindowAction;
+    // m_playerWindowToggleAction is already set in menu creation - no need to reassign
 
 
     // That's it! Just 3 tools + grid toggle + player window
     // No weather, no effects, no complex controls
+
+    // Initialize fog mode indicator state
+    updateFogModeIndicator();
 
     // Create contextual controls (initially hidden)
     createContextualControls();
@@ -1097,11 +1120,12 @@ void MainWindow::createContextualControls()
 
     m_gridSizeSpinner = new QSpinBox(this);
     m_gridSizeSpinner->setMinimum(20);
-    m_gridSizeSpinner->setMaximum(200);
+    m_gridSizeSpinner->setMaximum(500);  // Increased for high-res maps
     m_gridSizeSpinner->setValue(150);  // Default grid size (150px)
     m_gridSizeSpinner->setSuffix("px");
+    m_gridSizeSpinner->setSingleStep(10);  // Per CLAUDE.md spec: 10px increments
     m_gridSizeSpinner->setFixedWidth(85);  // Match brush spinner width
-    m_gridSizeSpinner->setToolTip("<b>Grid Size</b><br>Adjust grid cell size<br>Range: 20-200px");
+    m_gridSizeSpinner->setToolTip("<b>Grid Size</b><br>Adjust grid cell size<br>Range: 20-500px");
     m_gridSizeSpinner->setStyleSheet(R"(
         QSpinBox {
             background: rgba(255, 255, 255, 0.05);
@@ -1184,9 +1208,6 @@ void MainWindow::updateContextualToolbarControls()
 {
     if (!m_mainToolBar) return;
 
-    // Get current tool type
-    ToolType currentTool = m_toolManager ? m_toolManager->activeTool() : ToolType::Pointer;
-
     // === GLANCEABLE DESIGN (CLAUDE.md) ===
     // All sliders always visible - user can see what's possible at a glance
     // Disabled state makes it obvious when controls are inactive
@@ -1194,19 +1215,19 @@ void MainWindow::updateContextualToolbarControls()
     // === Brush Size Spinner ===
     // Always visible, enabled when Fog Mode ON
     if (m_fogBrushSizeSpinner) {
-        m_fogBrushSizeSpinner->setEnabled(m_fogEnabled);
+        m_fogBrushSizeSpinner->setEnabled(m_mapDisplay && m_mapDisplay->isFogEnabled());
     }
 
     // === Grid Size Spinner ===
     // Always visible, enabled when Grid ON
     if (m_gridSizeSpinner) {
-        m_gridSizeSpinner->setEnabled(m_gridEnabled);
+        m_gridSizeSpinner->setEnabled(m_mapDisplay && m_mapDisplay->isGridEnabled());
     }
 
     // === Reset Fog Button ===
     // Always visible, enabled when Fog Mode is ON
     if (m_resetFogAction) {
-        m_resetFogAction->setEnabled(m_fogEnabled);
+        m_resetFogAction->setEnabled(m_mapDisplay && m_mapDisplay->isFogEnabled());
 
         // Apply danger styling (always, since button always visible)
         if (m_mainToolBar) {
@@ -1250,6 +1271,7 @@ void MainWindow::setupToolbox()
 {
     m_toolboxWidget = new ToolboxWidget(this);
     addDockWidget(Qt::LeftDockWidgetArea, m_toolboxWidget);
+    m_toolboxWidget->hide();  // Hidden by default — toolbar provides primary controls
 
     m_toolboxWidget->setMapDisplay(m_mapDisplay);
     m_toolboxWidget->setPlayerWindow(m_playerWindow);
@@ -1280,9 +1302,9 @@ void MainWindow::setupToolbox()
         }
     });
 
-    connect(m_toolboxWidget, &ToolboxWidget::fogBrushSizeChanged, [this](int size) {
+    connect(m_toolboxWidget, &ToolboxWidget::fogBrushSizeChanged, [](int size) {
+        Q_UNUSED(size);
         // TODO: Implement brush size handling in fog system
-        // Store brush size in MainWindow for now
     });
 
     connect(m_toolboxWidget, &ToolboxWidget::gmOpacityChanged, [this](int opacity) {
@@ -1291,8 +1313,23 @@ void MainWindow::setupToolbox()
         }
     });
 
-    m_toolboxWidget->updateGridStatus(m_gridEnabled);
-    m_toolboxWidget->updateFogStatus(m_fogEnabled);
+    connect(m_toolboxWidget, &ToolboxWidget::beaconColorChanged, [this](const QColor& color) {
+        if (m_mapDisplay) {
+            m_mapDisplay->setBeaconColor(color);
+        }
+        // Persist the color selection
+        SettingsManager::instance().saveGMBeaconColor(color);
+    });
+
+    // Load saved beacon color from settings and apply to both toolbox and MapDisplay
+    QColor savedBeaconColor = SettingsManager::instance().loadGMBeaconColor();
+    m_toolboxWidget->setBeaconColor(savedBeaconColor);
+    if (m_mapDisplay) {
+        m_mapDisplay->setBeaconColor(savedBeaconColor);
+    }
+
+    m_toolboxWidget->updateGridStatus(m_mapDisplay && m_mapDisplay->isGridEnabled());
+    m_toolboxWidget->updateFogStatus(m_mapDisplay->isFogEnabled());
     m_toolboxWidget->updatePlayerViewStatus(m_playerViewModeEnabled);
 }
 
@@ -1322,10 +1359,9 @@ void MainWindow::loadMapFile(const QString& path)
 
     // Create TabsController on first map load
     if (!m_tabsController) {
-        std::cerr << "Creating TabsController on first map load..." << std::endl;
 
         m_tabsController = new TabsController(this);
-        m_tabsController->attach(m_tabWidget, m_mapDisplay, MAX_TABS);
+        m_tabsController->attach(m_tabBar, m_mapDisplay, MAX_TABS);
 
         // Connect signals
         connect(m_tabsController, &TabsController::requestShowProgress,
@@ -1345,9 +1381,26 @@ void MainWindow::loadMapFile(const QString& path)
                     // Update fog autosave controller with new map path and load existing fog state
                     if (m_fogAutosaveController) {
                         m_fogAutosaveController->setCurrentMapPath(mapPath);
-                        if (m_fogEnabled) {
+                        if (m_mapDisplay && m_mapDisplay->isFogEnabled()) {
                             m_fogAutosaveController->loadFromFile();
                         }
+                    }
+
+                    // Reset rotation to default when loading a new map
+                    m_mapRotation = 0;
+                    m_playerRotation = 0;
+                    if (m_mapDisplay) {
+                        m_mapDisplay->resetTransform();
+                        m_mapDisplay->scale(m_mapDisplay->getZoomLevel(), m_mapDisplay->getZoomLevel());
+                    }
+                    if (m_playerWindow) {
+                        m_playerWindow->setRotation(0);  // Reset player rotation via proper method
+                    }
+                    updateStatusIndicators();
+
+                    // Update window title with current map name
+                    if (!mapPath.isEmpty()) {
+                        setWindowTitle(QString("Project VTT — %1").arg(QFileInfo(mapPath).fileName()));
                     }
                 });
         // CRITICAL FIX: Connect requestAddRecent signal to add files to recent files menu
@@ -1364,7 +1417,7 @@ void MainWindow::togglePlayerWindow()
 {
     if (!m_playerWindow) {
         m_playerWindow = new PlayerWindow(m_mapDisplay);
-        m_playerWindow->setWindowTitle("LocalVTT - Player Display");
+        m_playerWindow->setWindowTitle("Project VTT - Player Display");
         m_playerWindow->resize(1024, 768);
 
         ensurePlayerWindowConnections();
@@ -1383,37 +1436,169 @@ void MainWindow::togglePlayerWindow()
             toast->showMessage("TV Display closed", ToastNotification::Type::Info, 2000);
         }
     } else {
-        std::cerr << "\n=== [MainWindow::togglePlayerWindow] OPENING PLAYER WINDOW - NEW ARCHITECTURE ===" << std::endl;
         m_playerWindow->show();
 
-        QImage currentMap = m_mapDisplay->getCurrentMapImage();
-        if (currentMap.isNull()) {
-            std::cerr << "[MainWindow::togglePlayerWindow] WARNING: No map loaded yet" << std::endl;
-        } else {
-            std::cerr << "[MainWindow::togglePlayerWindow] Map loaded: " << currentMap.width() << "x" << currentMap.height() << std::endl;
-        }
-        std::cerr.flush();
-
-        std::cerr << "[MainWindow::togglePlayerWindow] Calling forceRefresh() to copy map..." << std::endl;
-        std::cerr.flush();
         m_playerWindow->forceRefresh();
+
+        // Sync rotation when player window opens (if sync enabled)
+        if (m_syncRotationToPlayer) {
+            m_playerRotation = m_mapRotation;
+            m_playerWindow->setRotation(m_playerRotation);
+        }
 
         qreal currentZoom = m_mapDisplay->getZoomLevel();
         QPointF centerPoint = m_mapDisplay->mapToScene(m_mapDisplay->rect().center());
-        std::cerr << "[MainWindow::togglePlayerWindow] Syncing zoom: " << currentZoom << std::endl;
         m_playerWindow->syncZoom(currentZoom, centerPoint);
 
-        std::cerr << "=== [MainWindow::togglePlayerWindow] PLAYER WINDOW OPENED ===" << std::endl;
-        std::cerr.flush();
-
-        if (auto* toast = ToastNotification::instance(this)) {
-            toast->showMessage("TV Display opened - drag window to TV", ToastNotification::Type::Success, 3000);
+        // Auto-send to secondary display if available
+        QScreen* secondaryScreen = PlayerWindow::findSecondaryScreen();
+        if (secondaryScreen) {
+            m_playerWindow->moveToSecondaryDisplay();
+            if (auto* toast = ToastNotification::instance(this)) {
+                toast->showMessage("TV Display sent to secondary monitor (fullscreen)",
+                                  ToastNotification::Type::Success, 3000);
+            }
+        } else {
+            if (auto* toast = ToastNotification::instance(this)) {
+                toast->showMessage("TV Display opened - connect TV for auto-fullscreen",
+                                  ToastNotification::Type::Success, 3000);
+            }
         }
+
     }
 
     // Update the toggle button state
     if (m_playerWindowToggleAction) {
         m_playerWindowToggleAction->setChecked(m_playerWindow && m_playerWindow->isVisible());
+    }
+}
+
+void MainWindow::updateSendToDisplayMenu()
+{
+    if (!m_sendToDisplayMenu) return;
+
+    // Clear existing actions
+    m_sendToDisplayMenu->clear();
+
+    QList<QScreen*> screens = QGuiApplication::screens();
+    QScreen* primaryScreen = QGuiApplication::primaryScreen();
+
+    if (screens.size() <= 1) {
+        // Only one monitor - show informative disabled action
+        QAction* noDisplayAction = m_sendToDisplayMenu->addAction("No secondary display detected");
+        noDisplayAction->setEnabled(false);
+        return;
+    }
+
+    // Add action for each available screen
+    for (int i = 0; i < screens.size(); ++i) {
+        QScreen* screen = screens[i];
+        QString displayName;
+
+        // Create user-friendly name
+        if (screen == primaryScreen) {
+            displayName = QString("Display %1 (Primary) - %2x%3")
+                .arg(i + 1)
+                .arg(screen->geometry().width())
+                .arg(screen->geometry().height());
+        } else {
+            displayName = QString("Display %1 - %2x%3")
+                .arg(i + 1)
+                .arg(screen->geometry().width())
+                .arg(screen->geometry().height());
+        }
+
+        QAction* action = m_sendToDisplayMenu->addAction(displayName);
+
+        // Capture screen pointer for lambda
+        connect(action, &QAction::triggered, this, [this, screen]() {
+            sendPlayerWindowToScreen(screen);
+        });
+    }
+
+    // Add separator and enable state info
+    m_sendToDisplayMenu->addSeparator();
+    if (!m_playerWindow || !m_playerWindow->isVisible()) {
+        QAction* infoAction = m_sendToDisplayMenu->addAction("Open Player Window first (P)");
+        infoAction->setEnabled(false);
+    }
+}
+
+void MainWindow::sendPlayerWindowToScreen(QScreen* screen)
+{
+    if (!screen) return;
+
+    // Create player window if it doesn't exist
+    if (!m_playerWindow) {
+        m_playerWindow = new PlayerWindow(m_mapDisplay);
+        m_playerWindow->setWindowTitle("Project VTT - Player Display");
+        ensurePlayerWindowConnections();
+    }
+
+    // Show the window first if not visible
+    if (!m_playerWindow->isVisible()) {
+        m_playerWindow->show();
+        m_playerWindow->forceRefresh();
+    }
+
+    // Move to specified screen and go fullscreen
+    m_playerWindow->moveToScreen(screen, true);
+
+    // Show toast notification
+    if (auto* toast = ToastNotification::instance(this)) {
+        QString screenName = (screen == QGuiApplication::primaryScreen())
+            ? "primary display"
+            : QString("display %1").arg(QGuiApplication::screens().indexOf(screen) + 1);
+        toast->showMessage(QString("Player window sent to %1").arg(screenName),
+                          ToastNotification::Type::Success, 3000);
+    }
+
+    // Update toggle state
+    if (m_playerWindowToggleAction) {
+        m_playerWindowToggleAction->setChecked(true);
+    }
+}
+
+void MainWindow::syncViewToPlayers()
+{
+    if (!m_playerWindow || !m_playerWindow->isVisible()) {
+        // Open player window first
+        if (auto* toast = ToastNotification::instance(this)) {
+            toast->showMessage("Open Player Window first (P)", ToastNotification::Type::Warning, 3000);
+        }
+        return;
+    }
+
+    if (!m_mapDisplay) return;
+
+    // Get DM's current view
+    qreal currentZoom = m_mapDisplay->getZoomLevel();
+    QPointF centerPoint = m_mapDisplay->mapToScene(m_mapDisplay->rect().center());
+
+    // Push to player window (overrides auto-fit)
+    m_playerWindow->syncViewFromDM(currentZoom, centerPoint);
+
+    // Show toast notification
+    if (auto* toast = ToastNotification::instance(this)) {
+        toast->showMessage("View synced to players", ToastNotification::Type::Success, 2000);
+    }
+}
+
+void MainWindow::resetPlayerAutoFit()
+{
+    if (!m_playerWindow || !m_playerWindow->isVisible()) {
+        if (auto* toast = ToastNotification::instance(this)) {
+            toast->showMessage("Player Window not open", ToastNotification::Type::Warning, 2000);
+        }
+        return;
+    }
+
+    // Reset to auto-fit mode
+    m_playerWindow->resetToAutoFit();
+
+    // Show toast notification
+    if (auto* toast = ToastNotification::instance(this)) {
+        toast->showMessage("Player view reset to auto-fit", ToastNotification::Type::Success, 2000);
     }
 }
 
@@ -1428,12 +1613,11 @@ void MainWindow::toggleGrid()
 
     if (m_gridController) {
         m_gridController->toggleGrid();
-        // Sync MainWindow's state with GridController's state
-        m_gridEnabled = m_gridController->isGridEnabled();
 
         // Show toast notification with correct NEW state
         if (auto* toast = ToastNotification::instance(this)) {
-            QString message = m_gridEnabled ? "Grid shown" : "Grid hidden";
+            const bool gridOn = m_gridController->isGridEnabled();
+            QString message = gridOn ? "Grid shown" : "Grid hidden";
             toast->showMessage(message, ToastNotification::Type::Info, 2000);
         }
         updateStatusIndicators();
@@ -1577,19 +1761,27 @@ void MainWindow::updateGridSizeSlider()
 
 void MainWindow::toggleFogOfWar()
 {
-    m_fogEnabled = !m_fogEnabled;
-    m_mapDisplay->setFogEnabled(m_fogEnabled);
+    // Toggle fog via MapDisplay — the single source of truth for fog state
+    const bool newFogState = !m_mapDisplay->isFogEnabled();
+    m_mapDisplay->setFogEnabled(newFogState);
 
-    // Enable/disable fog tool buttons based on Fog Mode state
+    // Enable/disable fog tool buttons based on Fog Mode state (respecting lock)
+    bool fogControlsEnabled = newFogState && !m_fogLocked;
     if (m_fogBrushAction) {
-        m_fogBrushAction->setEnabled(m_fogEnabled);
+        m_fogBrushAction->setEnabled(fogControlsEnabled);
     }
     if (m_fogRectAction) {
-        m_fogRectAction->setEnabled(m_fogEnabled);
+        m_fogRectAction->setEnabled(fogControlsEnabled);
+    }
+    if (m_resetFogAction) {
+        m_resetFogAction->setEnabled(fogControlsEnabled);
+    }
+    if (m_fogHideToggleAction) {
+        m_fogHideToggleAction->setEnabled(newFogState);
     }
 
     // Auto-select Reveal Brush when fog is enabled
-    if (m_fogEnabled && m_fogBrushAction) {
+    if (newFogState && m_fogBrushAction) {
         m_fogBrushAction->setChecked(true);
         if (m_toolManager) {
             m_toolManager->setActiveTool(ToolType::FogBrush);
@@ -1604,11 +1796,11 @@ void MainWindow::toggleFogOfWar()
 
     // Update the action's checked state
     if (auto* action = getOrCreateAction("fog_toggle")) {
-        action->setChecked(m_fogEnabled);
+        action->setChecked(newFogState);
     }
 
     // Initialize fog autosave controller when fog is first enabled
-    if (m_fogEnabled && !m_fogAutosaveController) {
+    if (newFogState && !m_fogAutosaveController) {
         m_fogAutosaveController = new FogAutosaveController(this);
         m_fogAutosaveController->setMapDisplay(m_mapDisplay);
 
@@ -1634,19 +1826,19 @@ void MainWindow::toggleFogOfWar()
     }
 
     // Save fog state to settings
-    SettingsManager::instance().saveFogEnabled(m_fogEnabled);
+    SettingsManager::instance().saveFogEnabled(newFogState);
 
     // Show toast notification
     if (auto* toast = ToastNotification::instance(this)) {
-        QString message = m_fogEnabled ? "Fog of War enabled" : "Fog of War disabled";
-        ToastNotification::Type type = m_fogEnabled ? ToastNotification::Type::Warning : ToastNotification::Type::Success;
+        QString message = newFogState ? "Fog of War enabled" : "Fog of War disabled";
+        ToastNotification::Type type = newFogState ? ToastNotification::Type::Warning : ToastNotification::Type::Success;
         toast->showMessage(message, type, 2000);
     }
 
     // Update status indicators
     updateStatusIndicators();
 
-    statusBar()->showMessage(m_fogEnabled ? "Fog of War enabled" : "Fog of War disabled", 2000);
+    statusBar()->showMessage(newFogState ? "Fog of War enabled" : "Fog of War disabled", 2000);
 }
 
 void MainWindow::clearFogOfWar()
@@ -1705,7 +1897,7 @@ void MainWindow::autoOpenPlayerWindow()
                 return;
             }
 
-            m_playerWindow->setWindowTitle("LocalVTT - Player Display");
+            m_playerWindow->setWindowTitle("Project VTT - Player Display");
 
             ensurePlayerWindowConnections();
 
@@ -1732,13 +1924,6 @@ void MainWindow::autoOpenPlayerWindow()
         }
     } catch (const std::exception& e) {
         DebugConsole::warning(QString("Exception during player window auto-open: %1").arg(e.what()), "UI");
-        // Clean up on failure
-        if (m_playerWindow) {
-            delete m_playerWindow;
-            m_playerWindow = nullptr;
-        }
-    } catch (...) {
-        DebugConsole::warning("Unknown exception during player window auto-open", "UI");
         // Clean up on failure
         if (m_playerWindow) {
             delete m_playerWindow;
@@ -1796,6 +1981,15 @@ void MainWindow::ensurePlayerWindowConnections()
         [this]() {
             if (m_playerWindow && m_playerWindow->isVisible()) {
                 m_playerWindow->forceRefresh();
+            }
+            // First-map onboarding toast (once per launch)
+            static bool shownTip = false;
+            if (!shownTip) {
+                shownTip = true;
+                if (auto* toast = ToastNotification::instance(this)) {
+                    toast->showMessage("Tip: Press F for Fog of War, P to open Player View on TV",
+                                       ToastNotification::Type::Info, 5000);
+                }
             }
         },
         Qt::UniqueConnection
@@ -1914,8 +2108,9 @@ void MainWindow::dropEvent(QDropEvent *event)
             m_isDragging = false;
 
             // Load the dropped file with a slight delay for visual effect
-            QTimer::singleShot(150, [this, path]() {
-                loadMapFile(path);
+            QPointer<MainWindow> dropSelf = this;
+            QTimer::singleShot(150, this, [dropSelf, path]() {
+                if (dropSelf) dropSelf->loadMapFile(path);
             });
 
             event->acceptProposedAction();
@@ -2025,6 +2220,11 @@ void MainWindow::setupStatusBar()
     m_zoomStatusLabel->setToolTip("Zoom level (scroll to zoom)");
     statusLayout->addWidget(m_zoomStatusLabel);
 
+    // Rotation status indicator (shows DM/Player rotation state)
+    m_rotationStatusLabel = new QLabel("Rot: 0°", m_statusContainer);
+    m_rotationStatusLabel->setToolTip("DM rotation (click rotate button to change)");
+    statusLayout->addWidget(m_rotationStatusLabel);
+
     // Hidden privacy indicator (only shows when active)
     m_privacyStatusLabel = new QLabel("PRIVACY", m_statusContainer);
     m_privacyStatusLabel->setToolTip("Privacy mode active - Player screen protected");
@@ -2069,8 +2269,9 @@ void MainWindow::updateStatusIndicators()
     }
 
     // Minimalist grid indicator with subtle state
-    m_gridStatusLabel->setProperty("active", m_gridEnabled);
-    if (m_gridEnabled && m_mapDisplay && m_mapDisplay->getGridOverlay()) {
+    const bool gridEnabled = m_mapDisplay && m_mapDisplay->isGridEnabled();
+    m_gridStatusLabel->setProperty("active", gridEnabled);
+    if (gridEnabled && m_mapDisplay->getGridOverlay()) {
         GridOverlay* grid = m_mapDisplay->getGridOverlay();
         m_gridStatusLabel->setToolTip(QString("Grid: %1px = %2ft")
             .arg(grid->getGridSize())
@@ -2080,8 +2281,9 @@ void MainWindow::updateStatusIndicators()
     }
 
     // Minimalist fog indicator
-    m_fogStatusLabel->setProperty("active", m_fogEnabled);
-    m_fogStatusLabel->setToolTip(m_fogEnabled ? "Fog enabled" : "Fog disabled (Ctrl+F)");
+    const bool fogOn = m_mapDisplay && m_mapDisplay->isFogEnabled();
+    m_fogStatusLabel->setProperty("active", fogOn);
+    m_fogStatusLabel->setToolTip(fogOn ? "Fog enabled" : "Fog disabled (Ctrl+F)");
 
     // Player view mode indicator
     m_playerViewStatusLabel->setProperty("active", m_playerViewModeEnabled);
@@ -2094,6 +2296,28 @@ void MainWindow::updateStatusIndicators()
     }
     m_zoomStatusLabel->setText(QString("%1%").arg(qRound(zoomLevel)));
     m_zoomStatusLabel->setProperty("active", zoomLevel != 100.0);
+
+    // Rotation status - show DM and Player rotation if different
+    if (m_rotationStatusLabel) {
+        if (m_syncRotationToPlayer) {
+            // Synced: just show DM rotation
+            m_rotationStatusLabel->setText(QString("Rot: %1°").arg(m_mapRotation));
+            m_rotationStatusLabel->setToolTip("Rotation (synced to player)");
+            m_rotationStatusLabel->setStyleSheet("");  // Default style
+        } else {
+            // Independent: show both if different
+            if (m_mapRotation != m_playerRotation) {
+                m_rotationStatusLabel->setText(QString("DM:%1° / P:%2°").arg(m_mapRotation).arg(m_playerRotation));
+                m_rotationStatusLabel->setToolTip("DM and Player rotations are independent");
+                m_rotationStatusLabel->setStyleSheet("QLabel { color: #FFA500; }");  // Orange to indicate difference
+            } else {
+                m_rotationStatusLabel->setText(QString("Rot: %1°").arg(m_mapRotation));
+                m_rotationStatusLabel->setToolTip("Rotation (sync disabled, but currently matching)");
+                m_rotationStatusLabel->setStyleSheet("");
+            }
+        }
+        m_rotationStatusLabel->setProperty("active", m_mapRotation != 0 || m_playerRotation != 0);
+    }
 
     // Refresh styles with smooth transition
     m_gridStatusLabel->style()->unpolish(m_gridStatusLabel);
@@ -2304,6 +2528,146 @@ void MainWindow::fitToScreen()
     }
 }
 
+void MainWindow::centerOnMap()
+{
+    if (m_mapDisplay && m_mapDisplay->scene()) {
+        // Get the map bounds and center on it
+        QRectF sceneRect = m_mapDisplay->scene()->sceneRect();
+        if (!sceneRect.isEmpty()) {
+            m_mapDisplay->centerOn(sceneRect.center());
+            statusBar()->showMessage("View centered on map", 2000);
+        }
+    }
+}
+
+void MainWindow::toggleFogLock()
+{
+    m_fogLocked = !m_fogLocked;
+
+    // Update lock action icon
+    if (m_lockFogAction) {
+        m_lockFogAction->setIcon(QIcon(m_fogLocked ? ":/icons/lock.svg" : ":/icons/unlock.svg"));
+        m_lockFogAction->setToolTip(m_fogLocked ?
+            "<b>Fog Locked</b><br>Click to unlock fog editing" :
+            "<b>Fog Unlocked</b><br>Click to lock fog editing");
+        m_lockFogAction->setChecked(m_fogLocked);
+    }
+
+    // Disable/enable fog controls based on lock state
+    bool fogControlsEnabled = (m_mapDisplay && m_mapDisplay->isFogEnabled()) && !m_fogLocked;
+    if (m_fogBrushAction) m_fogBrushAction->setEnabled(fogControlsEnabled);
+    if (m_fogRectAction) m_fogRectAction->setEnabled(fogControlsEnabled);
+    if (m_resetFogAction) m_resetFogAction->setEnabled(fogControlsEnabled);
+    if (m_fogBrushSizeSpinner) m_fogBrushSizeSpinner->setEnabled(fogControlsEnabled);
+
+    statusBar()->showMessage(m_fogLocked ? "Fog editing locked" : "Fog editing unlocked", 2000);
+}
+
+void MainWindow::toggleGridLock()
+{
+    m_gridLocked = !m_gridLocked;
+
+    // Update lock action icon
+    if (m_lockGridAction) {
+        m_lockGridAction->setIcon(QIcon(m_gridLocked ? ":/icons/lock.svg" : ":/icons/unlock.svg"));
+        m_lockGridAction->setToolTip(m_gridLocked ?
+            "<b>Grid Locked</b><br>Click to unlock grid editing" :
+            "<b>Grid Unlocked</b><br>Click to lock grid editing");
+        m_lockGridAction->setChecked(m_gridLocked);
+    }
+
+    // Disable/enable grid controls based on lock state
+    if (m_gridSizeSpinner) m_gridSizeSpinner->setEnabled((m_mapDisplay && m_mapDisplay->isGridEnabled()) && !m_gridLocked);
+    if (m_toggleGridAction) m_toggleGridAction->setEnabled(!m_gridLocked);
+
+    statusBar()->showMessage(m_gridLocked ? "Grid editing locked" : "Grid editing unlocked", 2000);
+}
+
+void MainWindow::rotateMap()
+{
+    // Rotate 90° clockwise
+    m_mapRotation = (m_mapRotation + 90) % 360;
+
+    if (m_mapDisplay) {
+        // Reset and apply zoom + rotation together
+        qreal zoom = m_mapDisplay->getZoomLevel();
+        m_mapDisplay->resetTransform();
+        m_mapDisplay->scale(zoom, zoom);
+        m_mapDisplay->rotate(m_mapRotation);
+
+        // Re-center after rotation
+        if (m_mapDisplay->scene()) {
+            QRectF sceneRect = m_mapDisplay->scene()->sceneRect();
+            if (!sceneRect.isEmpty()) {
+                m_mapDisplay->centerOn(sceneRect.center());
+            }
+        }
+    }
+
+    // Only sync rotation to Player Window if sync is enabled
+    if (m_syncRotationToPlayer && m_playerWindow) {
+        m_playerRotation = m_mapRotation;  // Keep player rotation in sync
+        m_playerWindow->setRotation(m_playerRotation);  // Use PlayerWindow's rotation tracking
+    }
+
+    updateStatusIndicators();
+    QString rotationText = QString("%1°").arg(m_mapRotation);
+    statusBar()->showMessage(QString("Map rotated to %1").arg(rotationText), 2000);
+}
+
+void MainWindow::toggleRotationSync()
+{
+    m_syncRotationToPlayer = !m_syncRotationToPlayer;
+
+    // Update the menu action state
+    if (m_syncRotationToggleAction) {
+        m_syncRotationToggleAction->setChecked(m_syncRotationToPlayer);
+    }
+
+    // If sync was just enabled, immediately sync the current DM rotation to player
+    if (m_syncRotationToPlayer) {
+        syncRotationToPlayer();
+        statusBar()->showMessage("Rotation sync enabled - player view now matches DM", 2000);
+    } else {
+        statusBar()->showMessage("Rotation sync disabled - DM and player views can differ", 2000);
+    }
+
+    updateStatusIndicators();
+}
+
+void MainWindow::syncRotationToPlayer()
+{
+    if (!m_playerWindow) {
+        statusBar()->showMessage("Player Window not open", 2000);
+        return;
+    }
+
+    if (m_mapRotation != m_playerRotation) {
+        m_playerRotation = m_mapRotation;
+        m_playerWindow->setRotation(m_playerRotation);
+        statusBar()->showMessage(QString("Player rotation synced to %1°").arg(m_mapRotation), 2000);
+    } else {
+        statusBar()->showMessage("Player rotation already matches DM", 2000);
+    }
+
+    updateStatusIndicators();
+}
+
+void MainWindow::rotatePlayerView()
+{
+    if (!m_playerWindow) {
+        statusBar()->showMessage("Player Window not open", 2000);
+        return;
+    }
+
+    // Rotate player view 90° clockwise
+    m_playerRotation = (m_playerRotation + 90) % 360;
+    m_playerWindow->setRotation(m_playerRotation);
+
+    updateStatusIndicators();
+    statusBar()->showMessage(QString("Player view rotated to %1°").arg(m_playerRotation), 2000);
+}
+
 void MainWindow::zoomIn()
 {
     if (m_mapDisplay) {
@@ -2370,63 +2734,81 @@ void MainWindow::zoomOut()
 
 
 
+void MainWindow::updateFogModeIndicator()
+{
+    if (!m_mapDisplay) return;
+    bool hideMode = m_mapDisplay->isFogHideModeEnabled();
+
+    if (m_fogHideToggleAction) {
+        m_fogHideToggleAction->setText(hideMode ? "HIDE" : "REVEAL");
+        m_fogHideToggleAction->setChecked(hideMode);
+    }
+
+    // Update brush/rect button labels
+    if (m_fogBrushAction) {
+        m_fogBrushAction->setText(hideMode ? "Hide Brush" : "Reveal Brush");
+        m_fogBrushAction->setToolTip(hideMode
+            ? "<b>Hide Brush</b><br>Paint fog over revealed areas<br><i>Shortcut: H to toggle mode</i>"
+            : "<b>Reveal Brush</b><br>Paint to reveal areas<br><i>Shortcut: H to toggle mode</i>");
+    }
+
+    if (m_fogRectAction) {
+        m_fogRectAction->setText(hideMode ? "Hide Rect" : "Reveal Rect");
+        m_fogRectAction->setToolTip(hideMode
+            ? "<b>Hide Rectangle</b><br>Drag to cover area with fog<br><i>Shortcut: H to toggle mode</i>"
+            : "<b>Reveal Rectangle</b><br>Drag to reveal rectangular area<br><i>Shortcut: H to toggle mode</i>");
+    }
+
+    // Color the toggle button: green for reveal, red for hide
+    if (auto* btn = qobject_cast<QToolButton*>(m_mainToolBar->widgetForAction(m_fogHideToggleAction))) {
+        btn->setStyleSheet(hideMode
+            ? DarkTheme::dangerButtonStyle()
+            : DarkTheme::successButtonStyle());
+    }
+}
+
 void MainWindow::toggleFogHideMode()
 {
-    m_fogHideModeEnabled = !m_fogHideModeEnabled;
-
     if (m_mapDisplay) {
-        m_mapDisplay->setFogHideModeEnabled(m_fogHideModeEnabled);
+        const bool newHideMode = !m_mapDisplay->isFogHideModeEnabled();
+        m_mapDisplay->setFogHideModeEnabled(newHideMode);
 
         // Enable fog mode if hide mode is turned on
-        if (m_fogHideModeEnabled && !m_fogEnabled) {
-            m_fogEnabled = true;
+        if (newHideMode && !m_mapDisplay->isFogEnabled()) {
             m_mapDisplay->setFogEnabled(true);
         }
 
-        // Turn off other modes when fog hide mode is enabled
-        if (m_fogHideModeEnabled) {
-            // Turn off rectangle mode if fog hide mode is enabled
-            if (m_fogRectangleModeEnabled) {
-                m_fogRectangleModeEnabled = false;
-                m_mapDisplay->setFogRectangleModeEnabled(false);
-            }
-            statusBar()->showMessage("Fog hide mode enabled - left-click to hide, right-click to reveal", 3000);
+        if (newHideMode) {
+            statusBar()->showMessage("Fog Hide Mode: painting will cover areas with fog", 3000);
         } else {
-            statusBar()->showMessage("Fog hide mode disabled - left-click to reveal, right-click to hide", 3000);
+            statusBar()->showMessage("Fog Reveal Mode: painting will reveal areas through fog", 3000);
         }
 
+        updateFogModeIndicator();
         updateStatusIndicators();
-
-        // Sync with player window if open
-        if (m_playerWindow) {
-            m_playerWindow->forceRefresh();
-        }
     }
 }
 
 void MainWindow::toggleFogRectangleMode()
 {
-    m_fogRectangleModeEnabled = !m_fogRectangleModeEnabled;
-
-    // Update the menu action's checked state
-    if (m_fogRectangleModeAction) {
-        m_fogRectangleModeAction->setChecked(m_fogRectangleModeEnabled);
-    }
-
     if (m_mapDisplay) {
-        m_mapDisplay->setFogRectangleModeEnabled(m_fogRectangleModeEnabled);
+        const bool newRectMode = !m_mapDisplay->isFogRectangleModeEnabled();
+        m_mapDisplay->setFogRectangleModeEnabled(newRectMode);
+
+        // Update the menu action's checked state
+        if (m_fogRectangleModeAction) {
+            m_fogRectangleModeAction->setChecked(newRectMode);
+        }
 
         // Enable fog mode if rectangle mode is turned on
-        if (m_fogRectangleModeEnabled && !m_fogEnabled) {
-            m_fogEnabled = true;
+        if (newRectMode && !m_mapDisplay->isFogEnabled()) {
             m_mapDisplay->setFogEnabled(true);
         }
 
         // Turn off other modes when fog rectangle mode is enabled
-        if (m_fogRectangleModeEnabled) {
+        if (newRectMode) {
             // Turn off fog hide mode if fog rectangle mode is enabled
-            if (m_fogHideModeEnabled) {
-                m_fogHideModeEnabled = false;
+            if (m_mapDisplay->isFogHideModeEnabled()) {
                 m_mapDisplay->setFogHideModeEnabled(false);
             }
             statusBar()->showMessage("Rectangle fog mode enabled - click and drag to reveal/hide rectangular areas", 3000);
@@ -2464,18 +2846,12 @@ void MainWindow::togglePlayerViewMode()
 void MainWindow::keyPressEvent(QKeyEvent *event)
 {
     // Handle privacy shield shortcuts first (highest priority)
-    if (event->key() == Qt::Key_B) {
-        if (event->modifiers() == Qt::ControlModifier) {
-            // Ctrl+B = Intermission screen
-            activateIntermission();
-            event->accept();
-            return;
-        } else if (event->modifiers() == Qt::NoModifier) {
-            // B = Blackout
-            activateBlackout();
-            event->accept();
-            return;
-        }
+    // Note: Ctrl+B shortcut disabled; privacy/intermission feature still active via activateBlackout()
+    if (event->key() == Qt::Key_B && event->modifiers() == Qt::NoModifier) {
+        // B = Blackout
+        activateBlackout();
+        event->accept();
+        return;
     }
 
     // Handle unified tool system (NO number key shortcuts per CLAUDE.md)
@@ -2487,11 +2863,7 @@ void MainWindow::keyPressEvent(QKeyEvent *event)
                 return;
             }
             break;
-        case Qt::Key_0:
-            // Fit to screen with "0" key
-            fitToScreen();
-            event->accept();
-            return;
+        // Key_0 removed - use '/' for fit-to-screen (CLAUDE.md 3.6)
         }
     }
 
@@ -2551,6 +2923,17 @@ void MainWindow::resizeEvent(QResizeEvent *event)
     SettingsManager::instance().saveWindowGeometry("MainWindow", geometry());
 }
 
+void MainWindow::showEvent(QShowEvent *event)
+{
+    QMainWindow::showEvent(event);
+
+    // CRITICAL: Activate window and grab keyboard focus when shown
+    // This ensures shortcuts work immediately without requiring the user to click inside
+    activateWindow();
+    raise();
+    setFocus();
+}
+
 void MainWindow::toggleGridType()
 {
     if (m_gridController) {
@@ -2574,21 +2957,6 @@ void MainWindow::setupFogToolModeSystem()
     // - Shift+Drag = rectangle
     // This is all handled in MapDisplay mouse event handlers
 
-    // Create button group for future use if needed
-    m_fogToolButtonGroup = new QButtonGroup(this);
-
-    // Initialize action pointers to nullptr to prevent crashes
-    m_revealCircleAction = nullptr;
-    m_hideCircleAction = nullptr;
-    m_revealRectangleAction = nullptr;
-    m_hideRectangleAction = nullptr;
-    m_revealFeatheredAction = nullptr;
-    m_hideFeatheredAction = nullptr;
-    m_drawPenAction = nullptr;
-    m_drawEraserAction = nullptr;
-
-    // Action triggers are connected via FogToolsController
-
     updateFogToolModeUI();
 }
 
@@ -2603,15 +2971,10 @@ void MainWindow::setFogToolMode(FogToolMode mode)
         m_fogToolsController->setMode(mode);
     }
 
-    // Update legacy state variables for compatibility
-    // Unified fog mode - modifier keys determine behavior
-    m_fogHideModeEnabled = false;  // Will be determined by Alt key
-    m_fogRectangleModeEnabled = false;  // Will be determined by Shift key
-
-    // Update MapDisplay with new tool state
+    // Reset fog sub-modes — unified fog mode uses modifier keys at paint time
     if (m_mapDisplay) {
-        m_mapDisplay->setFogHideModeEnabled(m_fogHideModeEnabled);
-        m_mapDisplay->setFogRectangleModeEnabled(m_fogRectangleModeEnabled);
+        m_mapDisplay->setFogHideModeEnabled(false);
+        m_mapDisplay->setFogRectangleModeEnabled(false);
 
         // Do NOT auto-enable fog; respect the user's explicit fog toggle
 
@@ -2651,27 +3014,13 @@ void MainWindow::onExposureChanged(int value)
 
     // Convert slider value (1-200) to exposure (0.01-2.0)
     float exposure = value / 100.0f;
-    
-    // Check if using OpenGL display with HDR support
-    auto* openglDisplay = m_mapDisplay->getOpenGLDisplay();
-    if (openglDisplay && openglDisplay->isHDREnabled()) {
-        openglDisplay->setExposure(exposure);
-    }
 
     // Update label
     if (m_exposureLabel) {
         m_exposureLabel->setText(QString("Exposure: %1").arg(exposure, 0, 'f', 2));
     }
 
-    // Sync with player window
-    if (m_playerWindow && m_playerWindow->getMapDisplay()) {
-        auto* playerOpenGL = m_playerWindow->getMapDisplay()->getOpenGLDisplay();
-        if (playerOpenGL && playerOpenGL->isHDREnabled()) {
-            playerOpenGL->setExposure(exposure);
-        }
-    }
-
-    statusBar()->showMessage(QString("HDR exposure set to %1").arg(exposure, 0, 'f', 2), 2000);
+    statusBar()->showMessage(QString("Exposure set to %1").arg(exposure, 0, 'f', 2), 2000);
 }
 
 
@@ -2695,10 +3044,6 @@ QString MainWindow::getFogToolModeText(FogToolMode mode) const
     switch (mode) {
         case FogToolMode::UnifiedFog:
             return "Fog (Alt=Hide, Shift=Rect)";
-        case FogToolMode::DrawPen:
-            return "Draw (Pen)";
-        case FogToolMode::DrawEraser:
-            return "Draw (Eraser)";
         default:
             return "Unknown";
     }
@@ -2709,10 +3054,6 @@ QString MainWindow::getFogToolModeInstructions(FogToolMode mode) const
     switch (mode) {
         case FogToolMode::UnifiedFog:
             return "Click=Reveal, Alt+Click=Hide, Shift=Rectangle, Double-click=Clear visible, [/]=Size";
-        case FogToolMode::DrawPen:
-            return "Click and drag to draw lines";
-        case FogToolMode::DrawEraser:
-            return "Click to erase drawings";
         default:
             return "";
     }
@@ -2889,8 +3230,30 @@ void MainWindow::clearAllPointLights()
 
 void MainWindow::showPointLightProperties(const QUuid& lightId)
 {
-    // Point light feature removed - no longer supported
-    Q_UNUSED(lightId);
+    if (!m_mapDisplay || lightId.isNull()) {
+        return;
+    }
+
+    PointLightSystem* lightSystem = m_mapDisplay->getPointLightSystem();
+    if (!lightSystem) {
+        return;
+    }
+
+    const PointLight* light = lightSystem->getLight(lightId);
+    if (!light) {
+        return;
+    }
+
+    // Create and show the edit dialog
+    LightEditDialog dialog(this);
+    dialog.setLight(*light);
+
+    if (dialog.exec() == QDialog::Accepted) {
+        // Apply changes to the light
+        PointLight editedLight = dialog.getLight();
+        lightSystem->updateLight(lightId, editedLight);
+        qDebug() << "MainWindow: Updated light" << lightId << "- name:" << editedLight.name;
+    }
 }
 
 void MainWindow::updateLightingControls()
@@ -2961,7 +3324,7 @@ void MainWindow::updateAllMenuStates()
 {
     // Update grid state
     if (m_toggleGridAction) {
-        m_toggleGridAction->setChecked(m_gridEnabled);
+        m_toggleGridAction->setChecked(m_mapDisplay && m_mapDisplay->isGridEnabled());
     }
 
     // Update lighting states
@@ -2987,20 +3350,51 @@ void MainWindow::toggleDebugConsole()
     }
 }
 
-void MainWindow::showKeyboardShortcuts()
+void MainWindow::toggleMapBrowser()
 {
-    if (!m_actionRegistry) {
-        QMessageBox::warning(this, "Error", "ActionRegistry not available.");
+    if (!m_mapBrowserWidget) {
         return;
     }
-    
-    QStringList descriptions = m_actionRegistry->getAllShortcutDescriptions();
 
-    QString shortcutsText = "<h3>Keyboard Shortcuts</h3><pre style='font-family: monospace; font-size: 11pt;'>";
-    shortcutsText += descriptions.join("\n");
-    shortcutsText += "</pre>";
+    if (m_mapBrowserWidget->isVisible()) {
+        m_mapBrowserWidget->hide();
+        if (m_mapBrowserAction) {
+            m_mapBrowserAction->setChecked(false);
+        }
+    } else {
+        m_mapBrowserWidget->show();
+        m_mapBrowserWidget->refreshRecentFiles();
+        if (m_mapBrowserAction) {
+            m_mapBrowserAction->setChecked(true);
+        }
+    }
+}
 
-    QMessageBox::information(this, "Keyboard Shortcuts", shortcutsText);
+void MainWindow::toggleAtmosphereToolbox()
+{
+    if (!m_atmosphereToolbox) {
+        return;
+    }
+
+    if (m_atmosphereToolbox->isVisible()) {
+        m_atmosphereToolbox->hide();
+        if (m_atmosphereToolboxAction) {
+            m_atmosphereToolboxAction->setChecked(false);
+        }
+    } else {
+        m_atmosphereToolbox->show();
+        if (m_atmosphereToolboxAction) {
+            m_atmosphereToolboxAction->setChecked(true);
+        }
+    }
+}
+
+void MainWindow::showKeyboardShortcuts()
+{
+    if (!m_shortcutsOverlay) {
+        m_shortcutsOverlay = new KeyboardShortcutsOverlay(this);
+    }
+    m_shortcutsOverlay->showOverlay();
 }
 
 void MainWindow::showQuickStartGuide()
@@ -3009,14 +3403,16 @@ void MainWindow::showQuickStartGuide()
         "<h3>Quick Start Guide</h3>"
         "<p><b>1. Connect TV as second display</b><br>"
         "Set up your TV or second monitor as an extended display.</p>"
-        "<p><b>2. Launch LocalVTT</b><br>"
+        "<p><b>2. Launch Project VTT</b><br>"
         "The application will open with the main control window.</p>"
         "<p><b>3. Drag map onto main window</b><br>"
         "Drop any image file or VTT file onto the main window to load it.</p>"
         "<p><b>4. Player window appears automatically</b><br>"
         "The player view opens automatically on your TV/second display.</p>"
         "<p><b>5. Use fog tools to hide/reveal areas</b><br>"
-        "Use R/H keys or Shift+R/H for different fog tools to control what players see.</p>"
+        "Press F to enable Fog of War, then paint to reveal areas.<br>"
+        "Press H to toggle between Reveal and Hide modes.<br>"
+        "Use [ and ] to change brush size.</p>"
         "<p><i>Just maps on a TV - that's the entire scope!</i></p>";
 
     QMessageBox::information(this, "Quick Start Guide", guideText);
@@ -3025,15 +3421,14 @@ void MainWindow::showQuickStartGuide()
 void MainWindow::showAboutDialog()
 {
     QString aboutText =
-        "<h3>LocalVTT v1.0.0</h3>"
-        "<p><b>Digital battle mat for in-person tabletop gaming</b></p>"
-        "<p><i>Just maps on a TV</i></p>"
-        "<p>Copyright © 2024 LocalVTT<br>"
-        "Licensed under the MIT License</p>"
-        "<p>A simple, focused virtual tabletop designed specifically for<br>"
-        "displaying maps on a TV during in-person tabletop gaming sessions.</p>";
+        QString("<h3>Project VTT v%1</h3>").arg(APP_VERSION) +
+        "<p><b>Atmospheric maps for in-person tabletop gaming</b></p>"
+        "<p>Display maps on your TV with fog of war, lighting, weather, "
+        "and ambient sound for immersive game nights.</p>"
+        "<p>Copyright &copy; 2024-2026 Project VTT<br>"
+        "Licensed under the MIT License</p>";
 
-    QMessageBox::about(this, "About LocalVTT", aboutText);
+    QMessageBox::about(this, "About Project VTT", aboutText);
 }
 
 void MainWindow::activateBlackout()
