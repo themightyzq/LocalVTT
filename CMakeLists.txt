@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(LocalVTT VERSION 1.0.0 LANGUAGES CXX)
+project(CritVTT VERSION 1.0.0 LANGUAGES CXX)
 
 # Set C++ standard
 set(CMAKE_CXX_STANDARD 17)
@@ -203,10 +203,10 @@ qt6_add_resources(RESOURCES
 )
 
 # Create executable
-add_executable(LocalVTT ${SOURCES} ${HEADERS} ${RESOURCES})
+add_executable(CritVTT ${SOURCES} ${HEADERS} ${RESOURCES})
 
 # Make headers discoverable for nested includes
-target_include_directories(LocalVTT PRIVATE
+target_include_directories(CritVTT PRIVATE
     ${CMAKE_SOURCE_DIR}/src
     ${CMAKE_SOURCE_DIR}/src/controllers
     ${CMAKE_SOURCE_DIR}/src/ui
@@ -219,14 +219,14 @@ target_include_directories(LocalVTT PRIVATE
 
 # Compiler warnings
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
-    target_compile_options(LocalVTT PRIVATE
+    target_compile_options(CritVTT PRIVATE
         -Wall -Wextra -Wpedantic
         -Wno-unused-parameter
     )
 endif()
 
 # Link Qt libraries
-target_link_libraries(LocalVTT PRIVATE
+target_link_libraries(CritVTT PRIVATE
     Qt6::Core
     Qt6::Widgets
     Qt6::Gui
@@ -238,7 +238,7 @@ target_link_libraries(LocalVTT PRIVATE
 # Platform-specific linking for macOS
 if(APPLE)
     # Link only required frameworks, explicitly excluding AGL
-    target_link_libraries(LocalVTT PRIVATE
+    target_link_libraries(CritVTT PRIVATE
         "-framework OpenGL"
         "-framework Cocoa"
         "-framework IOKit"
@@ -256,10 +256,10 @@ endif()
 
 # Set executable properties
 if(APPLE)
-    set_target_properties(LocalVTT PROPERTIES
+    set_target_properties(CritVTT PROPERTIES
         MACOSX_BUNDLE TRUE
         MACOSX_BUNDLE_INFO_PLIST ${CMAKE_SOURCE_DIR}/Info.plist.in
-        MACOSX_BUNDLE_BUNDLE_NAME "Project VTT"
+        MACOSX_BUNDLE_BUNDLE_NAME "Crit VTT"
         MACOSX_BUNDLE_BUNDLE_VERSION ${PROJECT_VERSION}
         MACOSX_BUNDLE_SHORT_VERSION_STRING ${PROJECT_VERSION}
         INSTALL_RPATH "@loader_path/../Frameworks;/opt/homebrew/lib"
@@ -269,53 +269,53 @@ if(APPLE)
     # Deploy Qt plugins for macOS bundle
     if(QT_PLUGINS_DIR)
         # Create plugin directories in bundle
-        add_custom_command(TARGET LocalVTT POST_BUILD
+        add_custom_command(TARGET CritVTT POST_BUILD
             COMMENT "Deploying Qt plugins..."
             COMMAND ${CMAKE_COMMAND} -E make_directory
-                "$<TARGET_BUNDLE_DIR:LocalVTT>/Contents/PlugIns/imageformats"
+                "$<TARGET_BUNDLE_DIR:CritVTT>/Contents/PlugIns/imageformats"
             COMMAND ${CMAKE_COMMAND} -E make_directory
-                "$<TARGET_BUNDLE_DIR:LocalVTT>/Contents/PlugIns/platforms"
+                "$<TARGET_BUNDLE_DIR:CritVTT>/Contents/PlugIns/platforms"
         )
 
         # Copy essential image format plugins (including SVG for icon support)
         foreach(plugin jpeg ico webp gif tiff svg)
             if(EXISTS "${QT_PLUGINS_DIR}/imageformats/libq${plugin}.dylib")
-                add_custom_command(TARGET LocalVTT POST_BUILD
+                add_custom_command(TARGET CritVTT POST_BUILD
                     COMMAND ${CMAKE_COMMAND} -E copy_if_different
                         "${QT_PLUGINS_DIR}/imageformats/libq${plugin}.dylib"
-                        "$<TARGET_BUNDLE_DIR:LocalVTT>/Contents/PlugIns/imageformats/"
+                        "$<TARGET_BUNDLE_DIR:CritVTT>/Contents/PlugIns/imageformats/"
                 )
             endif()
         endforeach()
 
         # Copy platform plugin (required for Qt apps on macOS)
         if(EXISTS "${QT_PLUGINS_DIR}/platforms/libqcocoa.dylib")
-            add_custom_command(TARGET LocalVTT POST_BUILD
+            add_custom_command(TARGET CritVTT POST_BUILD
                 COMMAND ${CMAKE_COMMAND} -E copy_if_different
                     "${QT_PLUGINS_DIR}/platforms/libqcocoa.dylib"
-                    "$<TARGET_BUNDLE_DIR:LocalVTT>/Contents/PlugIns/platforms/"
+                    "$<TARGET_BUNDLE_DIR:CritVTT>/Contents/PlugIns/platforms/"
             )
         endif()
 
         # Copy SVG icon engine plugin (required for SVG icon support)
-        add_custom_command(TARGET LocalVTT POST_BUILD
+        add_custom_command(TARGET CritVTT POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E make_directory
-                "$<TARGET_BUNDLE_DIR:LocalVTT>/Contents/PlugIns/iconengines"
+                "$<TARGET_BUNDLE_DIR:CritVTT>/Contents/PlugIns/iconengines"
         )
         if(EXISTS "${QT_PLUGINS_DIR}/iconengines/libqsvgicon.dylib")
-            add_custom_command(TARGET LocalVTT POST_BUILD
+            add_custom_command(TARGET CritVTT POST_BUILD
                 COMMAND ${CMAKE_COMMAND} -E copy_if_different
                     "${QT_PLUGINS_DIR}/iconengines/libqsvgicon.dylib"
-                    "$<TARGET_BUNDLE_DIR:LocalVTT>/Contents/PlugIns/iconengines/"
+                    "$<TARGET_BUNDLE_DIR:CritVTT>/Contents/PlugIns/iconengines/"
             )
         endif()
     endif()
 
     # Create Resources directory and qt.conf to help Qt find plugins
-    add_custom_command(TARGET LocalVTT POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_BUNDLE_DIR:LocalVTT>/Contents/Resources"
-        COMMAND ${CMAKE_COMMAND} -E echo "[Paths]" > "$<TARGET_BUNDLE_DIR:LocalVTT>/Contents/Resources/qt.conf"
-        COMMAND ${CMAKE_COMMAND} -E echo "Plugins = PlugIns" >> "$<TARGET_BUNDLE_DIR:LocalVTT>/Contents/Resources/qt.conf"
+    add_custom_command(TARGET CritVTT POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_BUNDLE_DIR:CritVTT>/Contents/Resources"
+        COMMAND ${CMAKE_COMMAND} -E echo "[Paths]" > "$<TARGET_BUNDLE_DIR:CritVTT>/Contents/Resources/qt.conf"
+        COMMAND ${CMAKE_COMMAND} -E echo "Plugins = PlugIns" >> "$<TARGET_BUNDLE_DIR:CritVTT>/Contents/Resources/qt.conf"
     )
 
     # DISABLED: macdeployqt causes duplicate Qt framework loading issues
@@ -326,12 +326,12 @@ if(APPLE)
     if(USE_MACDEPLOYQT)
         find_program(MACDEPLOYQT_EXECUTABLE NAMES macdeployqt PATHS ${Qt6_DIR}/../../../bin /opt/homebrew/opt/qt@6/bin)
         if(MACDEPLOYQT_EXECUTABLE)
-            add_custom_command(TARGET LocalVTT POST_BUILD
+            add_custom_command(TARGET CritVTT POST_BUILD
                 COMMENT "Running macdeployqt for complete deployment..."
-                COMMAND ${MACDEPLOYQT_EXECUTABLE} "$<TARGET_BUNDLE_DIR:LocalVTT>" -always-overwrite
+                COMMAND ${MACDEPLOYQT_EXECUTABLE} "$<TARGET_BUNDLE_DIR:CritVTT>" -always-overwrite
                 VERBATIM
                 COMMENT "Re-signing app bundle to fix code signature..."
-                COMMAND codesign --force --deep --sign - "$<TARGET_BUNDLE_DIR:LocalVTT>"
+                COMMAND codesign --force --deep --sign - "$<TARGET_BUNDLE_DIR:CritVTT>"
             )
         else()
             message(STATUS "macdeployqt not found - using manual plugin deployment")
@@ -339,31 +339,31 @@ if(APPLE)
     else()
         message(STATUS "macdeployqt disabled for development builds (USE_MACDEPLOYQT=OFF)")
         # Just re-sign without bundling frameworks
-        add_custom_command(TARGET LocalVTT POST_BUILD
+        add_custom_command(TARGET CritVTT POST_BUILD
             COMMENT "Re-signing app bundle..."
-            COMMAND codesign --force --sign - "$<TARGET_BUNDLE_DIR:LocalVTT>"
+            COMMAND codesign --force --sign - "$<TARGET_BUNDLE_DIR:CritVTT>"
         )
     endif()
 
 elseif(WIN32)
-    set_target_properties(LocalVTT PROPERTIES
+    set_target_properties(CritVTT PROPERTIES
         WIN32_EXECUTABLE TRUE
     )
 
     # Deploy Qt plugins for Windows
     if(QT_PLUGINS_DIR)
-        add_custom_command(TARGET LocalVTT POST_BUILD
+        add_custom_command(TARGET CritVTT POST_BUILD
             COMMENT "Deploying Qt plugins for Windows..."
             COMMAND ${CMAKE_COMMAND} -E make_directory
-                "$<TARGET_FILE_DIR:LocalVTT>/imageformats"
+                "$<TARGET_FILE_DIR:CritVTT>/imageformats"
         )
 
         foreach(plugin jpeg ico webp gif)
             if(EXISTS "${QT_PLUGINS_DIR}/imageformats/q${plugin}.dll")
-                add_custom_command(TARGET LocalVTT POST_BUILD
+                add_custom_command(TARGET CritVTT POST_BUILD
                     COMMAND ${CMAKE_COMMAND} -E copy_if_different
                         "${QT_PLUGINS_DIR}/imageformats/q${plugin}.dll"
-                        "$<TARGET_FILE_DIR:LocalVTT>/imageformats/"
+                        "$<TARGET_FILE_DIR:CritVTT>/imageformats/"
                 )
             endif()
         endforeach()
@@ -372,9 +372,9 @@ elseif(WIN32)
     # Use windeployqt if available
     find_program(WINDEPLOYQT_EXECUTABLE windeployqt HINTS ${Qt6_DIR}/../../../bin)
     if(WINDEPLOYQT_EXECUTABLE)
-        add_custom_command(TARGET LocalVTT POST_BUILD
+        add_custom_command(TARGET CritVTT POST_BUILD
             COMMENT "Running windeployqt..."
-            COMMAND ${WINDEPLOYQT_EXECUTABLE} "$<TARGET_FILE:LocalVTT>"
+            COMMAND ${WINDEPLOYQT_EXECUTABLE} "$<TARGET_FILE:CritVTT>"
         )
     endif()
 endif()
@@ -382,24 +382,24 @@ endif()
 # Copy resources to correct location in app bundle
 if(APPLE)
     # Resources should go in Contents/Resources, not MacOS directory
-    add_custom_command(TARGET LocalVTT POST_BUILD
+    add_custom_command(TARGET CritVTT POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_directory
             "${CMAKE_SOURCE_DIR}/resources"
-            "$<TARGET_BUNDLE_DIR:LocalVTT>/Contents/Resources/resources"
+            "$<TARGET_BUNDLE_DIR:CritVTT>/Contents/Resources/resources"
         COMMENT "Copying resources to app bundle..."
     )
 else()
     # For non-macOS, copy to executable directory
-    add_custom_command(TARGET LocalVTT POST_BUILD
+    add_custom_command(TARGET CritVTT POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_directory
             "${CMAKE_SOURCE_DIR}/resources"
-            "$<TARGET_FILE_DIR:LocalVTT>/resources"
+            "$<TARGET_FILE_DIR:CritVTT>/resources"
         COMMENT "Copying resources..."
     )
 endif()
 
 # Install rules
-install(TARGETS LocalVTT
+install(TARGETS CritVTT
     BUNDLE DESTINATION .
     RUNTIME DESTINATION bin
 )

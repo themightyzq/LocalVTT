@@ -76,7 +76,7 @@ void ErrorHandler::logError(const QString& context, const QString& error)
     // Get log file path
     QString logDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
     QDir().mkpath(logDir);
-    QString logPath = logDir + "/projectvtt_errors.log";
+    QString logPath = logDir + "/critvtt_errors.log";
 
     QFile logFile(logPath);
     if (logFile.open(QIODevice::WriteOnly | QIODevice::Append)) {

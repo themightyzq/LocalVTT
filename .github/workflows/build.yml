@@ -42,19 +42,19 @@ jobs:
             DEPLOY=$(which macdeployqt 2>/dev/null || true)
           fi
           if [ -n "$DEPLOY" ]; then
-            "$DEPLOY" build/LocalVTT.app -always-overwrite || true
+            "$DEPLOY" build/CritVTT.app -always-overwrite || true
           else
             echo "macdeployqt not found, skipping deployment"
           fi
-          codesign --deep --force --sign - build/LocalVTT.app || true
+          codesign --deep --force --sign - build/CritVTT.app || true
 
       - name: Package
-        run: cd build && zip -r LocalVTT-macOS.zip LocalVTT.app
+        run: cd build && zip -r CritVTT-macOS.zip CritVTT.app
 
       - uses: actions/upload-artifact@v4
         with:
-          name: LocalVTT-macOS
-          path: build/LocalVTT-macOS.zip
+          name: CritVTT-macOS
+          path: build/CritVTT-macOS.zip
           retention-days: 30
 
   build-windows:
@@ -83,18 +83,18 @@ jobs:
         shell: cmd
         run: |
           cd build\%BUILD_TYPE%
-          windeployqt --release --no-translations --no-system-d3d-compiler --no-opengl-sw LocalVTT.exe
+          windeployqt --release --no-translations --no-system-d3d-compiler --no-opengl-sw CritVTT.exe
 
       - name: Package
         shell: powershell
         run: |
           cd build\${{ env.BUILD_TYPE }}
-          Compress-Archive -Path * -DestinationPath ..\LocalVTT-Windows-x64.zip
+          Compress-Archive -Path * -DestinationPath ..\CritVTT-Windows-x64.zip
 
       - uses: actions/upload-artifact@v4
         with:
-          name: LocalVTT-Windows-x64
-          path: build/LocalVTT-Windows-x64.zip
+          name: CritVTT-Windows-x64
+          path: build/CritVTT-Windows-x64.zip
           retention-days: 30
 
   build-linux:
@@ -119,13 +119,13 @@ jobs:
 
       - name: Package
         run: |
-          mkdir -p build/LocalVTT-Linux
-          cp build/LocalVTT build/LocalVTT-Linux/
-          cp -r resources build/LocalVTT-Linux/
-          cd build && tar -czf LocalVTT-Linux-x64.tar.gz LocalVTT-Linux/
+          mkdir -p build/CritVTT-Linux
+          cp build/CritVTT build/CritVTT-Linux/
+          cp -r resources build/CritVTT-Linux/
+          cd build && tar -czf CritVTT-Linux-x64.tar.gz CritVTT-Linux/
 
       - uses: actions/upload-artifact@v4
         with:
-          name: LocalVTT-Linux-x64
-          path: build/LocalVTT-Linux-x64.tar.gz
+          name: CritVTT-Linux-x64
+          path: build/CritVTT-Linux-x64.tar.gz
           retention-days: 30

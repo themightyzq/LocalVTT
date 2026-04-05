@@ -63,7 +63,7 @@ SettingsDialog::SettingsDialog(QWidget *parent)
     , m_resetButton(nullptr)
     , m_colorDialog(nullptr)
 {
-    setWindowTitle("Project VTT Preferences");
+    setWindowTitle("Crit VTT Preferences");
     setModal(true);
     setMinimumSize(500, 400);
     resize(600, 500);

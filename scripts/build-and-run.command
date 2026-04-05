@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Build and Run Script for Project VTT
+# Build and Run Script for Crit VTT
 # This script builds the project and launches the application
 
 set -e
@@ -10,7 +10,7 @@ SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 PROJECT_DIR="$SCRIPT_DIR"
 
 echo "================================================"
-echo "Project VTT - Build and Run"
+echo "Crit VTT - Build and Run"
 echo "================================================"
 echo "Project directory: $PROJECT_DIR"
 
@@ -33,37 +33,37 @@ if [ ! -f "CMakeCache.txt" ]; then
 fi
 
 # Build the project
-echo "Building Project VTT..."
+echo "Building Crit VTT..."
 BUILD_RESULT=0
 cmake --build . -j8 || BUILD_RESULT=$?
 
 # CRITICAL FIX: Remove AGL framework from link command if build failed
 if [ $BUILD_RESULT -ne 0 ]; then
-    if [ -f "CMakeFiles/ProjectVTT.dir/link.txt" ]; then
-        if grep -q "\-framework AGL" CMakeFiles/ProjectVTT.dir/link.txt; then
+    if [ -f "CMakeFiles/CritVTT.dir/link.txt" ]; then
+        if grep -q "\-framework AGL" CMakeFiles/CritVTT.dir/link.txt; then
             echo "Filtering out deprecated AGL framework..."
             # Remove "-framework AGL" from link.txt
-            sed -i '' 's/-framework AGL//g' CMakeFiles/ProjectVTT.dir/link.txt
+            sed -i '' 's/-framework AGL//g' CMakeFiles/CritVTT.dir/link.txt
 
             echo "Re-linking without AGL framework..."
             # Force re-link with corrected link.txt
-            rm -f ./ProjectVTT.app/Contents/MacOS/ProjectVTT
-            cmake --build . --target ProjectVTT -j8 || BUILD_RESULT=$?
+            rm -f ./CritVTT.app/Contents/MacOS/CritVTT
+            cmake --build . --target CritVTT -j8 || BUILD_RESULT=$?
         fi
     fi
 fi
 
 # Check if build succeeded
-if [ $BUILD_RESULT -eq 0 ] && [ -f "./ProjectVTT.app/Contents/MacOS/ProjectVTT" ]; then
+if [ $BUILD_RESULT -eq 0 ] && [ -f "./CritVTT.app/Contents/MacOS/CritVTT" ]; then
     echo ""
     echo "✅ Build successful!"
     echo ""
-    echo "Launching Project VTT..."
+    echo "Launching Crit VTT..."
     echo "================================================"
 
     # Fix Qt library paths with placeholders
     echo "Fixing Qt library paths..."
-    EXECUTABLE="./ProjectVTT.app/Contents/MacOS/ProjectVTT"
+    EXECUTABLE="./CritVTT.app/Contents/MacOS/CritVTT"
 
     # Find Qt installation path
     QT_PATH="/opt/homebrew/Cellar/qt/6.9.2"
@@ -99,7 +99,7 @@ if [ $BUILD_RESULT -eq 0 ] && [ -f "./ProjectVTT.app/Contents/MacOS/ProjectVTT" 
 
     # Fix plugin library paths
     echo "Fixing Qt plugin paths..."
-    for plugin in ./ProjectVTT.app/Contents/PlugIns/imageformats/*.dylib; do
+    for plugin in ./CritVTT.app/Contents/PlugIns/imageformats/*.dylib; do
         if [ -f "$plugin" ]; then
             # Fix Qt framework paths
             install_name_tool -change "@rpath/QtGui.framework/Versions/A/QtGui" \
@@ -114,7 +114,7 @@ if [ $BUILD_RESULT -eq 0 ] && [ -f "./ProjectVTT.app/Contents/MacOS/ProjectVTT" 
     done
 
     # Also fix platform plugin paths if present
-    for plugin in ./ProjectVTT.app/Contents/PlugIns/platforms/*.dylib; do
+    for plugin in ./CritVTT.app/Contents/PlugIns/platforms/*.dylib; do
         if [ -f "$plugin" ]; then
             install_name_tool -change "@rpath/QtGui.framework/Versions/A/QtGui" \
                                      "${QT_PATH}/lib/QtGui.framework/Versions/A/QtGui" "$plugin" 2>/dev/null || true
@@ -125,15 +125,15 @@ if [ $BUILD_RESULT -eq 0 ] && [ -f "./ProjectVTT.app/Contents/MacOS/ProjectVTT" 
 
     # Ad-hoc sign the entire app bundle to prevent Killed: 9
     echo "Ad-hoc signing app bundle..."
-    codesign --deep --force -s - ./ProjectVTT.app 2>/dev/null || true
+    codesign --deep --force -s - ./CritVTT.app 2>/dev/null || true
 
     # Kill any existing instances
-    pkill -f "ProjectVTT.app" 2>/dev/null || true
+    pkill -f "CritVTT.app" 2>/dev/null || true
     sleep 0.5
 
     # Launch the application
     echo "Starting application..."
-    open ./ProjectVTT.app
+    open ./CritVTT.app
 else
     echo ""
     echo "❌ Build failed!"

@@ -203,7 +203,7 @@ void MenuManager::createHelpMenu()
 
     m_helpMenu->addSeparator();
 
-    QAction* aboutAction = new QAction("&About Project VTT", m_mainWindow);
+    QAction* aboutAction = new QAction("&About Crit VTT", m_mainWindow);
     connect(aboutAction, &QAction::triggered, this, &MenuManager::showAboutRequested);
     m_helpMenu->addAction(aboutAction);
 }

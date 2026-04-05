@@ -2,7 +2,7 @@
 
 ## v1.0.0 — April 2026
 
-First public release.
+First public release as **Crit VTT** (renamed from Project VTT).
 
 ### Core Features
 - **Dual-window system** — DM control window + Player TV display

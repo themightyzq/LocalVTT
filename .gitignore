@@ -15,13 +15,13 @@ ui_*.h
 .qmake.stash
 *.pro.user
 *.pro.user.*
-LocalVTT_autogen/
+CritVTT_autogen/
 
 # Executables
 *.exe
 *.app
 *.out
-LocalVTT
+CritVTT
 
 # OS generated files
 .DS_Store

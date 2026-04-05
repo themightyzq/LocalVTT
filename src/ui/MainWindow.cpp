@@ -180,7 +180,7 @@ MainWindow::MainWindow(QWidget *parent)
 
     // CRITICAL: Remove try-catch blocks that hide errors - we need to see what's failing
     // Set initial window properties
-    setWindowTitle("Project VTT");
+    setWindowTitle("Crit VTT");
     resize(1200, 800);
     setMinimumSize(960, 600);
 
@@ -254,7 +254,7 @@ MainWindow::MainWindow(QWidget *parent)
     setObjectName("MainWindow");
 
     setAcceptDrops(true);
-    setWindowTitle("Project VTT");
+    setWindowTitle("Crit VTT");
 
     // CRITICAL: Set focus policy so MainWindow can receive keyboard events
     // This is required for shortcuts to work without clicking inside first
@@ -290,7 +290,7 @@ void MainWindow::closeEvent(QCloseEvent *event)
     // Show confirmation dialog before closing
     QMessageBox::StandardButton reply = QMessageBox::question(
         this,
-        "Quit Project VTT?",
+        "Quit Crit VTT?",
         "Are you sure you want to quit?\n\nAny unsaved fog changes will be lost.",
         QMessageBox::Yes | QMessageBox::No,
         QMessageBox::No  // Default to No for safety
@@ -1400,7 +1400,7 @@ void MainWindow::loadMapFile(const QString& path)
 
                     // Update window title with current map name
                     if (!mapPath.isEmpty()) {
-                        setWindowTitle(QString("Project VTT — %1").arg(QFileInfo(mapPath).fileName()));
+                        setWindowTitle(QString("Crit VTT — %1").arg(QFileInfo(mapPath).fileName()));
                     }
                 });
         // CRITICAL FIX: Connect requestAddRecent signal to add files to recent files menu
@@ -1417,7 +1417,7 @@ void MainWindow::togglePlayerWindow()
 {
     if (!m_playerWindow) {
         m_playerWindow = new PlayerWindow(m_mapDisplay);
-        m_playerWindow->setWindowTitle("Project VTT - Player Display");
+        m_playerWindow->setWindowTitle("Crit VTT - Player Display");
         m_playerWindow->resize(1024, 768);
 
         ensurePlayerWindowConnections();
@@ -1531,7 +1531,7 @@ void MainWindow::sendPlayerWindowToScreen(QScreen* screen)
     // Create player window if it doesn't exist
     if (!m_playerWindow) {
         m_playerWindow = new PlayerWindow(m_mapDisplay);
-        m_playerWindow->setWindowTitle("Project VTT - Player Display");
+        m_playerWindow->setWindowTitle("Crit VTT - Player Display");
         ensurePlayerWindowConnections();
     }
 
@@ -1897,7 +1897,7 @@ void MainWindow::autoOpenPlayerWindow()
                 return;
             }
 
-            m_playerWindow->setWindowTitle("Project VTT - Player Display");
+            m_playerWindow->setWindowTitle("Crit VTT - Player Display");
 
             ensurePlayerWindowConnections();
 
@@ -3403,7 +3403,7 @@ void MainWindow::showQuickStartGuide()
         "<h3>Quick Start Guide</h3>"
         "<p><b>1. Connect TV as second display</b><br>"
         "Set up your TV or second monitor as an extended display.</p>"
-        "<p><b>2. Launch Project VTT</b><br>"
+        "<p><b>2. Launch Crit VTT</b><br>"
         "The application will open with the main control window.</p>"
         "<p><b>3. Drag map onto main window</b><br>"
         "Drop any image file or VTT file onto the main window to load it.</p>"
@@ -3421,14 +3421,14 @@ void MainWindow::showQuickStartGuide()
 void MainWindow::showAboutDialog()
 {
     QString aboutText =
-        QString("<h3>Project VTT v%1</h3>").arg(APP_VERSION) +
+        QString("<h3>Crit VTT v%1</h3>").arg(APP_VERSION) +
         "<p><b>Atmospheric maps for in-person tabletop gaming</b></p>"
         "<p>Display maps on your TV with fog of war, lighting, weather, "
         "and ambient sound for immersive game nights.</p>"
-        "<p>Copyright &copy; 2024-2026 Project VTT<br>"
+        "<p>Copyright &copy; 2024-2026 Crit VTT<br>"
         "Licensed under the MIT License</p>";
 
-    QMessageBox::about(this, "About Project VTT", aboutText);
+    QMessageBox::about(this, "About Crit VTT", aboutText);
 }
 
 void MainWindow::activateBlackout()

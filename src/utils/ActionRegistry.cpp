@@ -57,7 +57,7 @@ void ActionRegistry::initializeActions()
     // Ctrl+L removed - confusing shortcut (CLAUDE.md UI consistency)
     registerAction("file_load", "Quick Load", "Quick load fog state", QKeySequence(), ActionCategory::File, false, "Quickly load saved fog state");
     // Recent files don't need shortcuts - accessible via menu
-    registerAction("file_quit", "Quit", "Exit application", QKeySequence::Quit, ActionCategory::File, false, "Exit Project VTT");
+    registerAction("file_quit", "Quit", "Exit application", QKeySequence::Quit, ActionCategory::File, false, "Exit Crit VTT");
 
     registerAction("edit_undo", "Undo", "Undo last action", QKeySequence::Undo, ActionCategory::Edit, false, "Undo the last action");
     registerAction("edit_redo", "Redo", "Redo last action", QKeySequence::Redo, ActionCategory::Edit, false, "Redo the last undone action");
@@ -78,7 +78,7 @@ void ActionRegistry::initializeActions()
 
     // Help menu actions - keep these as they're informational
     registerAction("help_shortcuts", "Keyboard Shortcuts", "Show keyboard shortcuts", QKeySequence("F1"), ActionCategory::System, false, "Display keyboard shortcuts reference");
-    registerAction("help_about", "About Project VTT", "About this application", QKeySequence(), ActionCategory::System, false, "Show information about Project VTT");
+    registerAction("help_about", "About Crit VTT", "About this application", QKeySequence(), ActionCategory::System, false, "Show information about Crit VTT");
 }
 
 void ActionRegistry::registerAction(const QString& id, const QString& text, const QString& tooltip,

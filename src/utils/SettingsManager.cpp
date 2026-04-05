@@ -18,7 +18,7 @@ SettingsManager& SettingsManager::instance()
 
 SettingsManager::SettingsManager()
 {
-    m_settings = new QSettings("ProjectVTT", "ProjectVTT");
+    m_settings = new QSettings("CritVTT", "CritVTT");
 }
 
 void SettingsManager::saveWindowGeometry(const QString& windowName, const QRect& geometry)

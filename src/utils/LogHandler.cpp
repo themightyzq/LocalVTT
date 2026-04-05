@@ -85,12 +85,12 @@ void LogHandler::install(const QString& logDir)
     }
     QDir().mkpath(dir);
 
-    s_logPath = dir + "/projectvtt.log";
+    s_logPath = dir + "/critvtt.log";
     rotateLogIfNeeded();
 
     s_logFile = fopen(s_logPath.toUtf8().constData(), "a");
     if (s_logFile) {
-        fprintf(s_logFile, "\n=== Project VTT started at %s ===\n",
+        fprintf(s_logFile, "\n=== Crit VTT started at %s ===\n",
                 QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss").toUtf8().constData());
         fflush(s_logFile);
     }

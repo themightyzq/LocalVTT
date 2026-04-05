@@ -2,6 +2,7 @@
 #include <QCoreApplication>
 #include <QDir>
 #include <QFile>
+#include <QSettings>
 #include <QCommandLineParser>
 #include <QCommandLineOption>
 #include <QTimer>
@@ -67,7 +68,7 @@ int main(int argc, char *argv[])
 
     QApplication app(argc, argv);
 
-    // Install file-based log handler (writes to AppData/logs/projectvtt.log)
+    // Install file-based log handler (writes to AppData/logs/critvtt.log)
     LogHandler::install();
 
     // Verify critical plugin support
@@ -139,15 +140,27 @@ int main(int argc, char *argv[])
 
 
     // Set application metadata
-    app.setApplicationName("Project VTT");
-    app.setOrganizationName("WNG");
-    app.setApplicationDisplayName("Project VTT - In-Person Virtual Tabletop");
+    app.setApplicationName("CritVTT");
+    app.setOrganizationName("CritVTT");
+    app.setApplicationDisplayName("Crit VTT - In-Person Virtual Tabletop");
+
+    // Migrate settings from old name
+    {
+        QSettings oldSettings("ProjectVTT", "ProjectVTT");
+        QSettings newSettings("CritVTT", "CritVTT");
+        if (newSettings.allKeys().isEmpty() && !oldSettings.allKeys().isEmpty()) {
+            for (const QString& key : oldSettings.allKeys()) {
+                newSettings.setValue(key, oldSettings.value(key));
+            }
+            newSettings.sync();
+        }
+    }
 
     // Note: AA_UseHighDpiPixmaps is deprecated in Qt 6 and enabled by default
 
     // Set up command line parser
     QCommandLineParser parser;
-    parser.setApplicationDescription("Project VTT - In-Person Virtual Tabletop for TV display");
+    parser.setApplicationDescription("Crit VTT - In-Person Virtual Tabletop for TV display");
     parser.addHelpOption();
 
     // Add positional argument for map file
@@ -176,7 +189,7 @@ int main(int argc, char *argv[])
 
     // Create and show the main window
     MainWindow mainWindow;
-    mainWindow.setWindowTitle("Project VTT - DM Control");
+    mainWindow.setWindowTitle("Crit VTT - DM Control");
     mainWindow.show();
 
     // Load map file if provided
