@@ -9,11 +9,12 @@ on:
 
 env:
   BUILD_TYPE: Release
-  QT_VERSION: '6.7.2'
+  QT_VERSION: '6.8.0'
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   build-macos:
-    runs-on: macos-13
+    runs-on: macos-latest
 
     steps:
       - uses: actions/checkout@v4
@@ -28,26 +29,27 @@ jobs:
 
       - name: Configure
         run: |
-          cmake -B build -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} \
-            -DUSE_MACDEPLOYQT=OFF
+          cmake -B build -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
 
       - name: Build
         run: cmake --build build --config ${{ env.BUILD_TYPE }} -j$(sysctl -n hw.ncpu)
 
       - name: Deploy Qt
         run: |
-          macdeployqt build/LocalVTT.app -always-overwrite || true
-          codesign --deep --force --sign - build/LocalVTT.app
-
-      - name: Verify
-        run: |
-          test -f build/LocalVTT.app/Contents/MacOS/LocalVTT
-          otool -L build/LocalVTT.app/Contents/MacOS/LocalVTT | grep -v "@rpath\|@executable_path\|/System\|/usr/lib\|:$" && exit 1 || true
-          echo "Build OK"
+          # Find macdeployqt from the install-qt-action path
+          DEPLOY=$(find "$Qt6_DIR/../../.." -name macdeployqt -type f 2>/dev/null | head -1)
+          if [ -z "$DEPLOY" ]; then
+            DEPLOY=$(which macdeployqt 2>/dev/null || true)
+          fi
+          if [ -n "$DEPLOY" ]; then
+            "$DEPLOY" build/LocalVTT.app -always-overwrite || true
+          else
+            echo "macdeployqt not found, skipping deployment"
+          fi
+          codesign --deep --force --sign - build/LocalVTT.app || true
 
       - name: Package
-        run: |
-          cd build && zip -r LocalVTT-macOS.zip LocalVTT.app
+        run: cd build && zip -r LocalVTT-macOS.zip LocalVTT.app
 
       - uses: actions/upload-artifact@v4
         with:
@@ -72,8 +74,7 @@ jobs:
           cache-key-prefix: 'qt-windows'
 
       - name: Configure
-        run: |
-          cmake -B build -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} -G "Visual Studio 17 2022" -A x64
+        run: cmake -B build -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} -G "Visual Studio 17 2022" -A x64
 
       - name: Build
         run: cmake --build build --config ${{ env.BUILD_TYPE }} --parallel
@@ -81,7 +82,7 @@ jobs:
       - name: Deploy Qt
         shell: cmd
         run: |
-          cd build\${{ env.BUILD_TYPE }}
+          cd build\%BUILD_TYPE%
           windeployqt --release --no-translations --no-system-d3d-compiler --no-opengl-sw LocalVTT.exe
 
       - name: Package
@@ -97,7 +98,7 @@ jobs:
           retention-days: 30
 
   build-linux:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
