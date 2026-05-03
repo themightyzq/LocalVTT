@@ -1,4 +1,4 @@
-# LocalVTT Build Instructions
+# CritVTT Build Instructions
 
 ## Prerequisites
 
@@ -63,7 +63,7 @@ The build scripts provide:
 
 ### Application Won't Launch (macOS)
 - The `build-and-run.command` script automatically fixes Qt library paths
-- If manual fixing needed: `codesign --deep --force -s - build/LocalVTT.app`
+- If manual fixing needed: `codesign --deep --force -s - build/CritVTT.app`
 
 ### Missing Qt Plugins
 - Ensure Qt is properly installed for your platform
@@ -85,6 +85,6 @@ cmake --build . --config Release  # Windows
 ## Binary Locations
 
 After successful build:
-- **macOS**: `build/LocalVTT.app`
-- **Linux**: `build/LocalVTT`
-- **Windows**: `build/Release/LocalVTT.exe`
+- **macOS**: `build/CritVTT.app`
+- **Linux**: `build/CritVTT`
+- **Windows**: `build/Release/CritVTT.exe`

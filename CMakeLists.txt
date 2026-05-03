@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(CritVTT VERSION 1.0.0 LANGUAGES CXX)
+project(CritVTT VERSION 1.0.1 LANGUAGES CXX OBJCXX)
 
 # Set C++ standard
 set(CMAKE_CXX_STANDARD 17)
@@ -12,11 +12,6 @@ set(CMAKE_AUTOUIC ON)
 string(TIMESTAMP BUILD_TIMESTAMP "%Y-%m-%d %H:%M:%S UTC" UTC)
 add_compile_definitions(BUILD_TIMESTAMP="${BUILD_TIMESTAMP}")
 add_compile_definitions(APP_VERSION="${PROJECT_VERSION}")
-
-# Enable Objective-C++ on macOS (for MusicRemote_mac.mm)
-if(APPLE)
-    enable_language(OBJCXX)
-endif()
 
 # Platform-specific configuration for macOS
 if(APPLE)
@@ -32,8 +27,7 @@ endif()
 
 # Set Qt6 path explicitly for macOS
 if(APPLE)
-    # Qt6 found via CMAKE_PREFIX_PATH or system paths
-    # For local dev: cmake -DCMAKE_PREFIX_PATH=$(brew --prefix qt) ..
+    set(CMAKE_PREFIX_PATH "/opt/homebrew/Cellar/qt/6.9.3" CACHE STRING "Qt6 installation path")
 endif()
 
 # Find Qt6 components
@@ -54,7 +48,7 @@ endif()
 
 # Also try to find plugins in the share/qt directory (common on Homebrew)
 if(NOT QT_PLUGINS_DIR OR NOT EXISTS "${QT_PLUGINS_DIR}")
-    set(QT_PLUGINS_DIR "${QT_PLUGINS_DIR_FALLBACK}")
+    set(QT_PLUGINS_DIR "/opt/homebrew/Cellar/qt/6.9.2/share/qt/plugins")
     if(EXISTS "${QT_PLUGINS_DIR}")
         message(STATUS "Using alternate Qt plugins directory: ${QT_PLUGINS_DIR}")
     endif()
@@ -98,6 +92,7 @@ set(SOURCES
     src/graphics/ImageCache.cpp
     src/audio/AmbientPlayer.cpp
     src/audio/MusicRemote.cpp
+    src/audio/MusicRemote_mac.mm
     src/utils/ImageLoader.cpp
     src/utils/VTTLoader.cpp
     src/utils/MapSession.cpp
@@ -191,11 +186,6 @@ set(HEADERS
     src/controllers/AtmosphereManager.h
     src/controllers/AtmosphereController.h
 )
-
-# macOS-only Objective-C++ sources
-if(APPLE)
-    list(APPEND SOURCES src/audio/MusicRemote_mac.mm)
-endif()
 
 # Qt Resources for icons
 qt6_add_resources(RESOURCES

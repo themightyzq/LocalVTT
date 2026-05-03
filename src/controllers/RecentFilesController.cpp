@@ -105,9 +105,10 @@ void RecentFilesController::updateMenu()
         m_actions[i]->setToolTip(QString("%1\n%2\nSize: %3\nLast modified: %4")
             .arg(fileName, filePath, sizeStr, lastModified.toString("MMM d, yyyy at h:mm AP")));
 
-        // Set keyboard shortcuts (Ctrl+1 through Ctrl+9)
+        // Recent file shortcuts use Ctrl+Shift+1..9 to avoid collision with
+        // Ctrl+1/2/3 zoom presets documented in README §Keyboard Shortcuts.
         if (i < 9) {
-            m_actions[i]->setShortcut(QKeySequence(QString("Ctrl+%1").arg(i + 1)));
+            m_actions[i]->setShortcut(QKeySequence(QString("Ctrl+Shift+%1").arg(i + 1)));
         } else {
             m_actions[i]->setShortcut(QKeySequence());
         }

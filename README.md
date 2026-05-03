@@ -47,7 +47,7 @@ That's the whole workflow. Everything else is optional.
 ### macOS
 
 #### Download
-Download the latest `.dmg` from the [Releases page](https://github.com/themightyzq/LocalVTT/releases). Open the DMG and drag Crit VTT to your Applications folder. On first launch, macOS may block the app — right-click it, select "Open", then click "Open" in the dialog. You only need to do this once.
+Download the latest `.dmg` from the [Releases page](https://github.com/themightyzq/Crit-VTT/releases). Open the DMG and drag Crit VTT to your Applications folder. On first launch, macOS may block the app — right-click it, select "Open", then click "Open" in the dialog. You only need to do this once.
 
 #### Build from Source
 ```bash
@@ -55,8 +55,8 @@ Download the latest `.dmg` from the [Releases page](https://github.com/themighty
 brew install qt cmake
 
 # Clone and build
-git clone https://github.com/themightyzq/LocalVTT.git
-cd LocalVTT
+git clone https://github.com/themightyzq/Crit-VTT.git
+cd Crit-VTT
 cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=$(brew --prefix qt)
 cmake --build build -j$(sysctl -n hw.ncpu)
 
@@ -83,8 +83,8 @@ sudo pacman -S qt6-base qt6-svg qt6-multimedia cmake
 
 Then build:
 ```bash
-git clone https://github.com/themightyzq/LocalVTT.git
-cd LocalVTT
+git clone https://github.com/themightyzq/Crit-VTT.git
+cd Crit-VTT
 cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j$(nproc)
 
@@ -94,7 +94,7 @@ cmake --build build -j$(nproc)
 
 ### Windows
 
-Download pre-built binaries from the [Releases page](https://github.com/themightyzq/LocalVTT/releases), or build from source with Qt 6 for Windows and Visual Studio 2022.
+Download pre-built binaries from the [Releases page](https://github.com/themightyzq/Crit-VTT/releases), or build from source with Qt 6 for Windows and Visual Studio 2022.
 
 ---
 
@@ -350,10 +350,15 @@ Light presets: Torch (flickering orange), Lantern (steady warm), Campfire (large
 | - | Zoom out |
 | / | Fit map to window |
 | Ctrl/Cmd+1/2/3 | Zoom to 100% / 200% / 300% |
+| Ctrl/Cmd+Shift+1..9 | Open recent file 1–9 |
 | Spacebar (hold) | Pan mode — drag to move |
 | G | Toggle grid |
 | V | Push DM view to Player Window |
 | Shift+V | Reset Player Window to auto-fit |
+| Shift+R | Push DM rotation to Player Window |
+| Ctrl/Cmd+R | Rotate Player View only (independent) |
+| F11 | Toggle fullscreen (Player Window) |
+| Ctrl/Cmd+Shift+F | Toggle Player Window auto-fit |
 
 ### Mouse & Trackpad
 
@@ -389,7 +394,7 @@ macOS blocks apps from unidentified developers. Right-click the app, select "Ope
 
 ### JPEG or WebP maps show a blank screen
 
-The image format plugins may be missing. If you built from source, run `macdeployqt` on the .app bundle. If you downloaded a release, please [file a bug](https://github.com/themightyzq/LocalVTT/issues).
+The image format plugins may be missing. If you built from source, run `macdeployqt` on the .app bundle. If you downloaded a release, please [file a bug](https://github.com/themightyzq/Crit-VTT/issues).
 
 ### Player Window is on the wrong screen
 
@@ -437,7 +442,7 @@ Crit VTT does one thing well: atmospheric maps for in-person games. Here's what 
 
 ## Contributing
 
-Bug reports and feature requests are welcome on the [GitHub Issues page](https://github.com/themightyzq/LocalVTT/issues).
+Bug reports and feature requests are welcome on the [GitHub Issues page](https://github.com/themightyzq/Crit-VTT/issues).
 
 ---
 

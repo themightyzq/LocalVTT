@@ -1,15 +1,15 @@
-# Project VTT - Quick Start Guide
+# Crit VTT - Quick Start Guide
 
-## What is Project VTT?
+## What is Crit VTT?
 
-Project VTT is the simplest digital battle mat for in-person tabletop gaming. It displays maps on your TV while you play with physical dice and miniatures at the table. No internet required, no accounts, no complexity - just maps on a TV.
+Crit VTT is the simplest digital battle mat for in-person tabletop gaming. It displays maps on your TV while you play with physical dice and miniatures at the table. No internet required, no accounts, no complexity - just maps on a TV.
 
 ## Setup (30 seconds)
 
 1. **Install**: Double-click the installer for your platform
 2. **Connect**: Plug your TV into your computer (HDMI cable)
 3. **Configure Display**: Set TV as extended display (not mirrored)
-4. **Launch**: Open Project VTT
+4. **Launch**: Open Crit VTT
 5. **Ready**: DM window on laptop, Player window on TV
 
 ## Basic Controls
@@ -117,7 +117,7 @@ Project VTT is the simplest digital battle mat for in-person tabletop gaming. It
 - Reduce image size if over 8K resolution
 - Restart app if running for many hours
 
-## What Project VTT Doesn't Do
+## What Crit VTT Doesn't Do
 
 This tool intentionally excludes:
 - Online/multiplayer features
@@ -128,7 +128,7 @@ This tool intentionally excludes:
 
 ## Support
 
-Project VTT is free and open source. For issues or questions:
+Crit VTT is free and open source. For issues or questions:
 - GitHub: [Project Repository]
 - No accounts or registration required
 - Works completely offline

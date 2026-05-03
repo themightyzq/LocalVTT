@@ -97,7 +97,7 @@ void AtmosphereToolboxWidget::setupUI()
     m_mainLayout->setSpacing(4);
 
     createPresetsSection();
-    createAudioSection();
+    // Audio panel removed — feature is out of scope per README.
     createLightingSection();
     createWeatherSection();
     createFogSection();
@@ -696,21 +696,25 @@ void AtmosphereToolboxWidget::connectSignals()
     connect(m_lightningFrequencySlider, &QSlider::valueChanged,
             this, &AtmosphereToolboxWidget::onLightningFrequencyChanged);
 
-    // Audio connections
-    connect(m_ambientVolumeSlider, &QSlider::valueChanged,
-            this, &AtmosphereToolboxWidget::onAmbientVolumeChanged);
-    connect(m_ambientBrowseButton, &QPushButton::clicked,
-            this, &AtmosphereToolboxWidget::onAmbientBrowseClicked);
-    connect(m_ambientStopButton, &QPushButton::clicked,
-            this, &AtmosphereToolboxWidget::onAmbientStopClicked);
-    connect(m_musicPrevButton, &QPushButton::clicked,
-            this, &AtmosphereToolboxWidget::onMusicPrevClicked);
-    connect(m_musicPlayPauseButton, &QPushButton::clicked,
-            this, &AtmosphereToolboxWidget::onMusicPlayPauseClicked);
-    connect(m_musicNextButton, &QPushButton::clicked,
-            this, &AtmosphereToolboxWidget::onMusicNextClicked);
-    connect(m_musicVolumeSlider, &QSlider::valueChanged,
-            this, &AtmosphereToolboxWidget::onMusicVolumeChanged);
+    // Audio connections — only wired when createAudioSection() built the
+    // widgets. Audio is currently out of scope; the section is not created
+    // and these pointers stay nullptr.
+    if (m_ambientVolumeSlider) {
+        connect(m_ambientVolumeSlider, &QSlider::valueChanged,
+                this, &AtmosphereToolboxWidget::onAmbientVolumeChanged);
+        connect(m_ambientBrowseButton, &QPushButton::clicked,
+                this, &AtmosphereToolboxWidget::onAmbientBrowseClicked);
+        connect(m_ambientStopButton, &QPushButton::clicked,
+                this, &AtmosphereToolboxWidget::onAmbientStopClicked);
+        connect(m_musicPrevButton, &QPushButton::clicked,
+                this, &AtmosphereToolboxWidget::onMusicPrevClicked);
+        connect(m_musicPlayPauseButton, &QPushButton::clicked,
+                this, &AtmosphereToolboxWidget::onMusicPlayPauseClicked);
+        connect(m_musicNextButton, &QPushButton::clicked,
+                this, &AtmosphereToolboxWidget::onMusicNextClicked);
+        connect(m_musicVolumeSlider, &QSlider::valueChanged,
+                this, &AtmosphereToolboxWidget::onMusicVolumeChanged);
+    }
 }
 
 void AtmosphereToolboxWidget::updateFromState(const AtmosphereState& state)
@@ -1030,6 +1034,11 @@ void AtmosphereToolboxWidget::setAudioSystems(AmbientPlayer* ambient, MusicRemot
 {
     m_ambientPlayer = ambient;
     m_musicRemote = remote;
+
+    // The audio panel is currently not built (createAudioSection() is not
+    // called). Guard so connecting real audio systems without the UI in place
+    // can never crash on a nullptr widget deref inside the lambdas below.
+    if (!m_audioSection) return;
 
     if (m_ambientPlayer) {
         connect(m_ambientPlayer, &AmbientPlayer::trackChanged, this, [this](const QString& track) {

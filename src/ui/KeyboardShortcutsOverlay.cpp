@@ -70,6 +70,7 @@ QList<KeyboardShortcutsOverlay::ShortcutColumn> KeyboardShortcutsOverlay::buildS
         {"/", "Fit to view"},
         {"Ctrl+1/2/3", "Zoom 100/200/300%"},
         {"Ctrl+O", "Open map"},
+        {"Ctrl+Shift+1..9", "Open recent file"},
     }});
 
     columns.append({"Fog Tools", {
@@ -86,6 +87,10 @@ QList<KeyboardShortcutsOverlay::ShortcutColumn> KeyboardShortcutsOverlay::buildS
         {"L", "Lighting on/off"},
         {"V", "Sync view to players"},
         {"Shift+V", "Reset player auto-fit"},
+        {"Shift+R", "Push rotation to players"},
+        {"Ctrl+R", "Rotate Player view only"},
+        {"F11", "Player Window fullscreen"},
+        {"Ctrl+Shift+F", "Player Window auto-fit"},
     }});
 
     columns.append({"Panels", {
@@ -141,7 +146,7 @@ void KeyboardShortcutsOverlay::paintEvent(QPaintEvent*)
     int colWidth = 240;
     int numCols = columns.size();
     int cardWidth = numCols * colWidth + 60;
-    int cardHeight = 300;
+    int cardHeight = 340;  // Tall enough for 9-row Display column + dismiss hint
     int cardX = (width() - cardWidth) / 2;
     int cardY = (height() - cardHeight) / 2;
 

@@ -605,10 +605,11 @@ void MainWindow::createMenus()
         m_viewMenu->addAction(fogToggleAction);
     }
 
-    // Rectangle fog tool toggle - ApplicationShortcut so it works regardless of focus
+    // Rectangle fog tool toggle - no keyboard shortcut (toolbar button only).
+    // The previous `R` binding was undocumented and could fire while the user
+    // was typing into the brush/grid spinners; CLAUDE.md §7.1 forbids
+    // undocumented shortcuts.
     QAction* fogRectangleAction = new QAction("&Rectangle Fog Tool", this);
-    fogRectangleAction->setShortcut(QKeySequence("R"));
-    fogRectangleAction->setShortcutContext(Qt::ApplicationShortcut);
     fogRectangleAction->setCheckable(true);
     fogRectangleAction->setChecked(m_mapDisplay->isFogRectangleModeEnabled());
     connect(fogRectangleAction, &QAction::triggered, this, &MainWindow::toggleFogRectangleMode);
@@ -860,6 +861,10 @@ void MainWindow::createMenus()
 
     // HELP MENU - Minimal
     m_helpMenu = menuBar()->addMenu("&Help");
+
+    QAction* quickStartAction = new QAction("&Quick Start", this);
+    connect(quickStartAction, &QAction::triggered, this, &MainWindow::showQuickStartGuide);
+    m_helpMenu->addAction(quickStartAction);
 
     QAction* shortcutsAction = new QAction("&Keyboard Shortcuts", this);
     connect(shortcutsAction, &QAction::triggered, this, &MainWindow::showKeyboardShortcuts);
@@ -2748,15 +2753,15 @@ void MainWindow::updateFogModeIndicator()
     if (m_fogBrushAction) {
         m_fogBrushAction->setText(hideMode ? "Hide Brush" : "Reveal Brush");
         m_fogBrushAction->setToolTip(hideMode
-            ? "<b>Hide Brush</b><br>Paint fog over revealed areas<br><i>Shortcut: H to toggle mode</i>"
-            : "<b>Reveal Brush</b><br>Paint to reveal areas<br><i>Shortcut: H to toggle mode</i>");
+            ? "<b>Hide Brush</b><br>Paint fog over revealed areas<br><i>Shortcut: H toggles Hide/Reveal</i>"
+            : "<b>Reveal Brush</b><br>Paint to reveal areas<br><i>Shortcut: H toggles Hide/Reveal</i>");
     }
 
     if (m_fogRectAction) {
         m_fogRectAction->setText(hideMode ? "Hide Rect" : "Reveal Rect");
         m_fogRectAction->setToolTip(hideMode
-            ? "<b>Hide Rectangle</b><br>Drag to cover area with fog<br><i>Shortcut: H to toggle mode</i>"
-            : "<b>Reveal Rectangle</b><br>Drag to reveal rectangular area<br><i>Shortcut: H to toggle mode</i>");
+            ? "<b>Hide Rectangle</b><br>Drag to cover area with fog<br><i>Shortcut: H toggles Hide/Reveal</i>"
+            : "<b>Reveal Rectangle</b><br>Drag to reveal rectangular area<br><i>Shortcut: H toggles Hide/Reveal</i>");
     }
 
     // Color the toggle button: green for reveal, red for hide
@@ -3407,8 +3412,8 @@ void MainWindow::showQuickStartGuide()
         "The application will open with the main control window.</p>"
         "<p><b>3. Drag map onto main window</b><br>"
         "Drop any image file or VTT file onto the main window to load it.</p>"
-        "<p><b>4. Player window appears automatically</b><br>"
-        "The player view opens automatically on your TV/second display.</p>"
+        "<p><b>4. Press P to open the Player Window</b><br>"
+        "Drag it to your TV/second display and maximize.</p>"
         "<p><b>5. Use fog tools to hide/reveal areas</b><br>"
         "Press F to enable Fog of War, then paint to reveal areas.<br>"
         "Press H to toggle between Reveal and Hide modes.<br>"
@@ -3423,8 +3428,8 @@ void MainWindow::showAboutDialog()
     QString aboutText =
         QString("<h3>Crit VTT v%1</h3>").arg(APP_VERSION) +
         "<p><b>Atmospheric maps for in-person tabletop gaming</b></p>"
-        "<p>Display maps on your TV with fog of war, lighting, weather, "
-        "and ambient sound for immersive game nights.</p>"
+        "<p>Display maps on your TV with fog of war, dynamic lighting, "
+        "and weather effects for immersive game nights.</p>"
         "<p>Copyright &copy; 2024-2026 Crit VTT<br>"
         "Licensed under the MIT License</p>";
 

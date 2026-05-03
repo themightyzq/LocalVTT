@@ -30,11 +30,9 @@ AtmosphereManager::AtmosphereManager(QObject* parent)
     m_transitionTimer->setInterval(TICK_INTERVAL_MS);
     connect(m_transitionTimer, &QTimer::timeout, this, &AtmosphereManager::onTransitionTick);
 
-    // Create ambient audio player
-    m_ambientPlayer = new AmbientPlayer(this);
-
-    // Create music remote control
-    m_musicRemote = new MusicRemote(this);
+    // Audio is out of scope per README §"What Crit VTT Does NOT Do".
+    // m_ambientPlayer / m_musicRemote remain nullptr; AtmosphereToolboxWidget
+    // hides the audio panel and setAudioSystems() null-guards both pointers.
 
     // Initialize with default state (Peaceful Day)
     m_currentState = AtmospherePreset::getPresetByName("Peaceful Day").state;

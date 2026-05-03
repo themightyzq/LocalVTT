@@ -21,8 +21,11 @@ void ActionRegistry::initializeActions()
     registerAction("fog_toggle", "Toggle Fog of War", "Toggle fog of war display", QKeySequence("F"), ActionCategory::Fog, true, "Enable or disable fog of war");
     registerAction("fog_brush_smaller", "Decrease Brush Size", "Make fog brush smaller", QKeySequence("["), ActionCategory::Fog, false, "Decrease the size of the fog brush");
     registerAction("fog_brush_larger", "Increase Brush Size", "Make fog brush larger", QKeySequence("]"), ActionCategory::Fog, false, "Increase the size of the fog brush");
-    registerAction("fog_clear", "Clear Fog of War", "Clear all fog of war", QKeySequence("Ctrl+Shift+F"), ActionCategory::Fog, false, "Remove all fog of war from the map");
-    registerAction("fog_reset", "Reset Fog of War", "Reset fog to cover entire map", QKeySequence("Ctrl+Shift+R"), ActionCategory::Fog, false, "Reset fog to cover the entire map");
+    // No keyboard shortcuts: Ctrl+Shift+F is reserved for Player Window
+    // auto-fit (§7.1) and Ctrl+Shift+R is undocumented (§2.1 P3 forbids).
+    // Both actions remain available via menus / Reset Fog toolbar button.
+    registerAction("fog_clear", "Clear Fog of War", "Clear all fog of war", QKeySequence(), ActionCategory::Fog, false, "Remove all fog of war from the map");
+    registerAction("fog_reset", "Reset Fog of War", "Reset fog to cover entire map", QKeySequence(), ActionCategory::Fog, false, "Reset fog to cover the entire map");
     registerAction("fog_undo", "Undo Fog Change", "Undo last fog operation", QKeySequence::Undo, ActionCategory::Fog, false, "Undo the last fog of war change");
     registerAction("fog_redo", "Redo Fog Change", "Redo last fog operation", QKeySequence::Redo, ActionCategory::Fog, false, "Redo the last undone fog of war change");
     registerAction("fog_hide_toggle", "Toggle Fog Hide Mode", "Switch between reveal and hide", QKeySequence("H"), ActionCategory::Fog, true, "Toggle fog hide/reveal mode");
