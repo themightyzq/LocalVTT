@@ -17,7 +17,7 @@ jobs:
     runs-on: macos-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install Qt6
         uses: jurplel/install-qt-action@v4
@@ -51,7 +51,7 @@ jobs:
       - name: Package
         run: cd build && zip -r CritVTT-macOS.zip CritVTT.app
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: CritVTT-macOS
           path: build/CritVTT-macOS.zip
@@ -61,7 +61,7 @@ jobs:
     runs-on: windows-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: microsoft/setup-msbuild@v2
 
@@ -91,7 +91,7 @@ jobs:
           cd build\${{ env.BUILD_TYPE }}
           Compress-Archive -Path * -DestinationPath ..\CritVTT-Windows-x64.zip
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: CritVTT-Windows-x64
           path: build/CritVTT-Windows-x64.zip
@@ -101,7 +101,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install dependencies
         run: |
@@ -124,7 +124,7 @@ jobs:
           cp -r resources build/CritVTT-Linux/
           cd build && tar -czf CritVTT-Linux-x64.tar.gz CritVTT-Linux/
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: CritVTT-Linux-x64
           path: build/CritVTT-Linux-x64.tar.gz
