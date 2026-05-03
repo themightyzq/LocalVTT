@@ -1,5 +1,11 @@
 cmake_minimum_required(VERSION 3.16)
-project(CritVTT VERSION 1.0.1 LANGUAGES CXX OBJCXX)
+# OBJCXX (Objective-C++) is only needed on macOS for MusicRemote_mac.mm and
+# similar files. Linux/Windows lack the Objective-C++ compiler ('cc1objplus'),
+# so enabling it unconditionally breaks CI configure on those platforms.
+project(CritVTT VERSION 1.0.1 LANGUAGES CXX)
+if(APPLE)
+    enable_language(OBJCXX)
+endif()
 
 # Set C++ standard
 set(CMAKE_CXX_STANDARD 17)
@@ -92,7 +98,6 @@ set(SOURCES
     src/graphics/ImageCache.cpp
     src/audio/AmbientPlayer.cpp
     src/audio/MusicRemote.cpp
-    src/audio/MusicRemote_mac.mm
     src/utils/ImageLoader.cpp
     src/utils/VTTLoader.cpp
     src/utils/MapSession.cpp
@@ -194,6 +199,11 @@ qt6_add_resources(RESOURCES
 
 # Create executable
 add_executable(CritVTT ${SOURCES} ${HEADERS} ${RESOURCES})
+
+# Objective-C++ source for system music remote — Apple-only.
+if(APPLE)
+    target_sources(CritVTT PRIVATE src/audio/MusicRemote_mac.mm)
+endif()
 
 # Make headers discoverable for nested includes
 target_include_directories(CritVTT PRIVATE
